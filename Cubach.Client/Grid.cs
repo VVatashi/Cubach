@@ -10,6 +10,8 @@ namespace Cubach.Client
         public readonly Vector3i Position;
         public readonly Vector3i Size;
 
+        public bool IsEmpty { get; private set; } = false;
+
         public Grid(World world, Vector3i position, Vector3i size)
         {
             World = world;
@@ -22,8 +24,34 @@ namespace Cubach.Client
         public int Height => Size.Y;
         public int Length => Size.Z;
 
+        public void UpdateIsEmpty()
+        {
+            for (int i = 0; i < Width; ++i)
+            {
+                for (int j = 0; j < Height; ++j)
+                {
+                    for (int k = 0; k < Length; ++k)
+                    {
+                        Block block = Blocks[i, j, k];
+                        if (block.Type.GenGeometry)
+                        {
+                            IsEmpty = false;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            IsEmpty = true;
+        }
+
         public VertexP3N3T2[] GenVertexes()
         {
+            if (IsEmpty)
+            {
+                return new VertexP3N3T2[0];
+            }
+
             var result = new List<VertexP3N3T2>(Blocks.Length * Block.VertexCount);
 
             for (int i = 0; i < Width; ++i)
@@ -52,14 +80,37 @@ namespace Cubach.Client
                         bool hasFrontBlock = frontBlockType != null && frontBlockType.GenGeometry;
                         bool hasBackBlock = backBlockType != null && backBlockType.GenGeometry;
 
-                        if (hasLeftBlock && hasRightBlock && hasBottomBlock && hasTopBlock && hasFrontBlock && hasBackBlock)
+                        Block block = Blocks[i, j, k];
+
+                        if (!hasLeftBlock)
                         {
-                            continue;
+                            result.AddRange(block.GenLeftVertexes(i, j, k));
                         }
 
-                        Block block = Blocks[i, j, k];
-                        VertexP3N3T2[] blockVertexes = block.GenVertexes(i, j, k);
-                        result.AddRange(blockVertexes);
+                        if (!hasRightBlock)
+                        {
+                            result.AddRange(block.GenRightVertexes(i, j, k));
+                        }
+
+                        if (!hasBottomBlock)
+                        {
+                            result.AddRange(block.GenBottomVertexes(i, j, k));
+                        }
+
+                        if (!hasTopBlock)
+                        {
+                            result.AddRange(block.GenTopVertexes(i, j, k));
+                        }
+
+                        if (!hasFrontBlock)
+                        {
+                            result.AddRange(block.GenFrontVertexes(i, j, k));
+                        }
+
+                        if (!hasBackBlock)
+                        {
+                            result.AddRange(block.GenBackVertexes(i, j, k));
+                        }
                     }
                 }
             }

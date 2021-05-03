@@ -4,31 +4,37 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Linq;
 using System.Threading;
 
 namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 512f - 64f;
-        private const float GRID_UNLOAD_DISTANCE = 512f;
+        private const float GRID_GEN_DISTANCE = 1024f - 64f;
+        private const float GRID_UNLOAD_DISTANCE = 1024f;
 
         private const float MESH_GEN_DISTANCE = 512f - 64f;
         private const float MESH_UNLOAD_DISTANCE = 512f;
 
         private const float MAX_RENDER_DISTANCE = 512f;
 
-        private const int MAX_GRID_GEN_PER_FRAME = 32;
         private const int MAX_MESH_GEN_PER_FRAME = 8;
+
+        public static bool Exiting = false;
+        public readonly static ManualResetEvent WorldGenBarrier = new ManualResetEvent(false);
+        public readonly static ConcurrentQueue<Vector3i> GridsToUpdate = new ConcurrentQueue<Vector3i>();
+        public static Thread WorldGenThread;
 
         public static GameWindow Window;
 
         public static WorldGen WorldGen;
         public static World World;
-        public static Camera Camera = new Camera(new Vector3(0, 32, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
+        public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
 
         public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
 
@@ -45,6 +51,31 @@ namespace Cubach.Client
                 Window.RenderFrame += Window_RenderFrame;
                 Window.Closed += Window_Closed;
                 Window.Run();
+            }
+
+            Exiting = true;
+
+            WorldGenBarrier.Set();
+        }
+
+        private static void WorldGenCallback()
+        {
+            while (!Exiting)
+            {
+                WorldGenBarrier.WaitOne();
+
+                if (GridsToUpdate.IsEmpty)
+                {
+                    WorldGenBarrier.Reset();
+                    continue;
+                }
+
+                while (GridsToUpdate.TryDequeue(out Vector3i gridPosition))
+                {
+                    GenGrid(gridPosition);
+                }
+
+                WorldGenBarrier.Reset();
             }
         }
 
@@ -65,6 +96,9 @@ namespace Cubach.Client
             GL.Hint(HintTarget.LineSmoothHint, HintMode.Nicest);
             GL.Hint(HintTarget.PolygonSmoothHint, HintMode.Nicest);
             GL.Hint(HintTarget.PerspectiveCorrectionHint, HintMode.Nicest);
+
+            WorldGenThread = new Thread(new ThreadStart(WorldGenCallback));
+            WorldGenThread.Start();
 
             WorldGen = new WorldGen();
             World = new World(WorldGen);
@@ -175,7 +209,12 @@ void main(void) {
 
         private static void Window_UpdateFrame(FrameEventArgs obj)
         {
-            const float moveSpeed = 10f;
+            float moveSpeed = 10f;
+
+            if (Window.KeyboardState.IsKeyDown(Keys.LeftShift))
+            {
+                moveSpeed *= 2;
+            }
 
             if (Window.KeyboardState.IsKeyDown(Keys.A))
             {
@@ -289,14 +328,15 @@ void main(void) {
 
         private static void GenNearGrids()
         {
-            var gridPositions = new List<Vector3i>(MAX_GRID_GEN_PER_FRAME);
-            Vector3i cameraPosition = (Vector3i)(Camera.Position / 16);
-            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / 16) / 3;
-            int n = 0;
+            const int minHeight = -1;
+            const int maxHeight = 5;
+
+            Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GridSize);
+            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GridSize) / 3;
 
             for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
             {
-                for (int j = Math.Max(cameraPosition.Y - genDistance, -1); j < Math.Max(cameraPosition.Y + genDistance, 4); ++j)
+                for (int j = Math.Max(cameraPosition.Y - genDistance, minHeight); j < Math.Min(cameraPosition.Y + genDistance, maxHeight); ++j)
                 {
                     for (int k = cameraPosition.Z - genDistance; k < cameraPosition.Z + genDistance; ++k)
                     {
@@ -313,31 +353,20 @@ void main(void) {
                             continue;
                         }
 
-                        if (n++ > MAX_GRID_GEN_PER_FRAME)
-                        {
-                            continue;
-                        }
-
-                        gridPositions.Add(gridPosition);
+                        GridsToUpdate.Enqueue(gridPosition);
                     }
                 }
             }
 
-            if (gridPositions.Count > 0)
+            if (!GridsToUpdate.IsEmpty)
             {
-                ThreadPool.QueueUserWorkItem((obj) =>
-                {
-                    foreach (Vector3i gridPosition in gridPositions)
-                    {
-                        GenGrid(gridPosition);
-                    }
-                });
+                WorldGenBarrier.Set();
             }
         }
 
         private static void UnloadFarGrids()
         {
-            foreach ((Vector3i gridPosition, Grid grid) in World.Grids)
+            foreach (Vector3i gridPosition in World.Grids.Keys)
             {
                 Vector3 gridCenter = GetGridCenter(gridPosition);
                 float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
@@ -350,9 +379,9 @@ void main(void) {
 
         private static void GenNearGridMeshes()
         {
-            int n = 0;
+            List<Vector3i> gridMeshesToUpdate = new List<Vector3i>();
 
-            foreach ((Vector3i gridPosition, Grid grid) in World.Grids)
+            foreach (Vector3i gridPosition in World.Grids.Keys)
             {
                 if (WorldMeshes.ContainsKey(gridPosition))
                 {
@@ -363,19 +392,33 @@ void main(void) {
                 float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
                 if (distance < MESH_GEN_DISTANCE)
                 {
-                    GenGridMesh(grid);
+                    gridMeshesToUpdate.Add(gridPosition);
+                }
+            }
 
-                    if (n++ > MAX_MESH_GEN_PER_FRAME)
-                    {
-                        return;
-                    }
+            gridMeshesToUpdate.Sort((Vector3i a, Vector3i b) =>
+            {
+                Vector3 aGridCenter = GetGridCenter(a);
+                Vector3 bGridCenter = GetGridCenter(b);
+
+                float aDistance = Coords.TaxicabDistance3(aGridCenter, Camera.Position);
+                float bDistance = Coords.TaxicabDistance3(bGridCenter, Camera.Position);
+
+                return MathF.Sign(aDistance - bDistance);
+            });
+
+            foreach (Vector3i gridPosition in gridMeshesToUpdate.Take(MAX_MESH_GEN_PER_FRAME).ToArray())
+            {
+                if (World.Grids.TryGetValue(gridPosition, out Grid grid))
+                {
+                    GenGridMesh(grid);
                 }
             }
         }
 
         private static void UnloadFarGridMeshes()
         {
-            foreach ((Vector3i gridPosition, var mesh) in WorldMeshes)
+            foreach (Vector3i gridPosition in WorldMeshes.Keys)
             {
                 Vector3 gridCenter = GetGridCenter(gridPosition);
                 float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);

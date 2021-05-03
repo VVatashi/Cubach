@@ -47,6 +47,8 @@ namespace Cubach.Client
                 }
             }
 
+            grid.UpdateIsEmpty();
+
             return grid;
         }
     }
