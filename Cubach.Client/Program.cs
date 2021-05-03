@@ -13,16 +13,16 @@ namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 384f - 64f;
-        private const float GRID_UNLOAD_DISTANCE = 384f;
+        private const float GRID_GEN_DISTANCE = 512f - 64f;
+        private const float GRID_UNLOAD_DISTANCE = 512f;
 
-        private const float MESH_GEN_DISTANCE = 384f - 64f;
-        private const float MESH_UNLOAD_DISTANCE = 384f;
+        private const float MESH_GEN_DISTANCE = 512f - 64f;
+        private const float MESH_UNLOAD_DISTANCE = 512f;
 
-        private const float MAX_RENDER_DISTANCE = 384f;
+        private const float MAX_RENDER_DISTANCE = 512f;
 
-        private const int MAX_GRID_GEN_PER_FRAME = 16;
-        private const int MAX_MESH_GEN_PER_FRAME = 4;
+        private const int MAX_GRID_GEN_PER_FRAME = 32;
+        private const int MAX_MESH_GEN_PER_FRAME = 8;
 
         public static GameWindow Window;
 
@@ -296,7 +296,7 @@ void main(void) {
 
             for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
             {
-                for (int j = cameraPosition.Y - genDistance; j < cameraPosition.Y + genDistance; ++j)
+                for (int j = Math.Max(cameraPosition.Y - genDistance, -1); j < Math.Max(cameraPosition.Y + genDistance, 4); ++j)
                 {
                     for (int k = cameraPosition.Z - genDistance; k < cameraPosition.Z + genDistance; ++k)
                     {
