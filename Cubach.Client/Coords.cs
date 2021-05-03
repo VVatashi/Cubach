@@ -21,5 +21,15 @@ namespace Cubach.Client
 
             return new Vector3(x, y, z);
         }
+
+        public static float TaxicabDistance2(Vector2 a, Vector2 b)
+        {
+            return Math.Abs(b.X - a.X) + Math.Abs(b.Y - a.Y);
+        }
+
+        public static float TaxicabDistance3(Vector3 a, Vector3 b)
+        {
+            return Math.Abs(b.X - a.X) + Math.Abs(b.Y - a.Y) + Math.Abs(b.Z - a.Z);
+        }
     }
 }

@@ -1,38 +1,43 @@
-﻿using OpenTK.Windowing.Common;
-using OpenTK.Windowing.Desktop;
-using OpenTK.Graphics.OpenGL4;
+﻿using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
+using OpenTK.Windowing.Common;
+using OpenTK.Windowing.Desktop;
+using OpenTK.Windowing.GraphicsLibraryFramework;
 using System;
-using System.Runtime.InteropServices;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Collections.Generic;
-using OpenTK.Windowing.GraphicsLibraryFramework;
+using System.Threading;
 
 namespace Cubach.Client
 {
     public static class Program
     {
+        private const float GRID_GEN_DISTANCE = 384f - 64f;
+        private const float GRID_UNLOAD_DISTANCE = 384f;
+
+        private const float MESH_GEN_DISTANCE = 384f - 64f;
+        private const float MESH_UNLOAD_DISTANCE = 384f;
+
+        private const float MAX_RENDER_DISTANCE = 384f;
+
+        private const int MAX_GRID_GEN_PER_FRAME = 16;
+        private const int MAX_MESH_GEN_PER_FRAME = 4;
+
         public static GameWindow Window;
 
-        public static Camera Camera = new Camera { Position = new Vector3(18, 18, 18), Rotation = Quaternion.Identity };
+        public static WorldGen WorldGen;
+        public static World World;
+        public static Camera Camera = new Camera(new Vector3(0, 32, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
 
-        public static int VertexArrayHandle;
-        public static int VertexBufferHandle;
-        public static int VertexCount;
+        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
+
         public static int TextureHandle;
         public static int ShaderProgramHandle;
 
-        public static Dictionary<byte, BlockType> BlockTypes = new Dictionary<byte, BlockType>
-        {
-            [0] = new BlockType { GenGeometry = false, TextureId = 0, TopTextureId = 0, BottomTextureId = 0 },
-            [1] = new BlockType { GenGeometry = true, TextureId = 1, TopTextureId = 1, BottomTextureId = 1 },
-            [2] = new BlockType { GenGeometry = true, TextureId = 2, TopTextureId = 0, BottomTextureId = 1 },
-        };
-
         public static void Main(string[] args)
         {
-            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings()))
+            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings() { Title = "Cubach" }))
             {
                 Window.Load += Window_Load;
                 Window.Resize += Window_Resize;
@@ -41,111 +46,6 @@ namespace Cubach.Client
                 Window.Closed += Window_Closed;
                 Window.Run();
             }
-        }
-
-        public static float[] GenGridVertexes(byte[,,] blocks)
-        {
-            const int blockVertexCount = 36;
-
-            var result = new List<float>(blocks.Length * blockVertexCount);
-
-            for (int i = 0; i < blocks.GetLength(0); ++i)
-            {
-                for (int j = 0; j < blocks.GetLength(1); ++j)
-                {
-                    for (int k = 0; k < blocks.GetLength(2); ++k)
-                    {
-                        float[] blockVertexes = GenBlockVertexes(blocks[i, j, k], i, j, k);
-                        result.AddRange(blockVertexes);
-                    }
-                }
-            }
-
-            return result.ToArray();
-        }
-
-        public static float[] GenBlockVertexes(byte blockTypeId, int x, int y, int z)
-        {
-            return GenBlockVertexes(BlockTypes[blockTypeId], x, y, z);
-        }
-
-        public static float[] GenBlockVertexes(BlockType blockType, int x, int y, int z)
-        {
-            if (!blockType.GenGeometry)
-            {
-                return new float[0];
-            }
-
-            float u1 = (blockType.TextureId % 16) / 16f;
-            float u2 = (blockType.TextureId % 16 + 1) / 16f;
-            float v1 = (blockType.TextureId / 16) / 16f;
-            float v2 = (blockType.TextureId / 16 + 1) / 16f;
-
-            float topU1 = (blockType.TopTextureId % 16) / 16f;
-            float topU2 = (blockType.TopTextureId % 16 + 1) / 16f;
-            float topV1 = (blockType.TopTextureId / 16) / 16f;
-            float topV2 = (blockType.TopTextureId / 16 + 1) / 16f;
-
-            float bottomU1 = (blockType.BottomTextureId % 16) / 16f;
-            float bottomU2 = (blockType.BottomTextureId % 16 + 1) / 16f;
-            float bottomV1 = (blockType.BottomTextureId / 16) / 16f;
-            float bottomV2 = (blockType.BottomTextureId / 16 + 1) / 16f;
-
-            return new float[] {
-                // -Z
-                    x,     y, z,   0, 0, -1,   u2, v2,
-                x + 1,     y, z,   0, 0, -1,   u1, v2,
-                x + 1, y + 1, z,   0, 0, -1,   u1, v1,
-
-                    x, y,     z,   0, 0, -1,   u2, v2,
-                x + 1, y + 1, z,   0, 0, -1,   u1, v1,
-                    x, y + 1, z,   0, 0, -1,   u2, v1,
-
-                // -Y
-                    x, y,     z,   0, -1, 0,   bottomU1, bottomV1,
-                x + 1, y, z + 1,   0, -1, 0,   bottomU2, bottomV2,
-                x + 1, y,     z,   0, -1, 0,   bottomU2, bottomV1,
-
-                    x, y,     z,   0, -1, 0,   bottomU1, bottomV1,
-                    x, y, z + 1,   0, -1, 0,   bottomU1, bottomV2,
-                x + 1, y, z + 1,   0, -1, 0,   bottomU2, bottomV2,
-
-                // -X
-                x,     y,     z,   -1, 0, 0,   u1, v2,
-                x, y + 1,     z,   -1, 0, 0,   u1, v1,
-                x, y + 1, z + 1,   -1, 0, 0,   u2, v1,
-
-                x,     y,     z,   -1, 0, 0,   u1, v2,
-                x, y + 1, z + 1,   -1, 0, 0,   u2, v1,
-                x,     y, z + 1,   -1, 0, 0,   u2, v2,
-
-                // Z
-                    x,     y, z + 1,   0, 0, 1,   u1, v2,
-                x + 1, y + 1, z + 1,   0, 0, 1,   u2, v1,
-                x + 1,     y, z + 1,   0, 0, 1,   u2, v2,
-
-                    x,     y, z + 1,   0, 0, 1,   u1, v2,
-                    x, y + 1, z + 1,   0, 0, 1,   u1, v1,
-                x + 1, y + 1, z + 1,   0, 0, 1,   u2, v1,
-
-                // Y
-                    x, y + 1,     z,   0, 1, 0,   topU1, topV1,
-                x + 1, y + 1,     z,   0, 1, 0,   topU2, topV1,
-                x + 1, y + 1, z + 1,   0, 1, 0,   topU2, topV2,
-
-                    x, y + 1,     z,   0, 1, 0,   topU1, topV1,
-                x + 1, y + 1, z + 1,   0, 1, 0,   topU2, topV2,
-                    x, y + 1, z + 1,   0, 1, 0,   topU1, topV2,
-
-                // X
-                x + 1,     y,     z,   1, 0, 0,   u2, v2,
-                x + 1, y + 1, z + 1,   1, 0, 0,   u1, v1,
-                x + 1, y + 1,     z,   1, 0, 0,   u2, v1,
-
-                x + 1,     y,     z,   1, 0, 0,   u2, v2,
-                x + 1,     y, z + 1,   1, 0, 0,   u1, v2,
-                x + 1, y + 1, z + 1,   1, 0, 0,   u1, v1,
-            };
         }
 
         private static void Window_Load()
@@ -166,59 +66,11 @@ namespace Cubach.Client
             GL.Hint(HintTarget.PolygonSmoothHint, HintMode.Nicest);
             GL.Hint(HintTarget.PerspectiveCorrectionHint, HintMode.Nicest);
 
-            VertexBufferHandle = GL.GenBuffer();
-            GL.BindBuffer(BufferTarget.ArrayBuffer, VertexBufferHandle);
+            WorldGen = new WorldGen();
+            World = new World(WorldGen);
 
-            byte[,,] grid = new byte[16, 16, 16];
-            for (int i = 0; i < grid.GetLength(0); ++i)
-            {
-                for (int k = 0; k < grid.GetLength(2); ++k)
-                {
-                    float noise = (PerlinNoise.Noise(0.1f * new Vector2(i, k)) + 1) / 2;
-                    int maxHeight = 8 + (int)Math.Floor(8 * noise);
-
-                    for (int j = 0; j < grid.GetLength(1); ++j)
-                    {
-                        if (j < maxHeight)
-                        {
-                            grid[i, j, k] = 1;
-                        }
-                        else if (j == maxHeight)
-                        {
-                            grid[i, j, k] = 2;
-                        }
-                        else
-                        {
-                            grid[i, j, k] = 0;
-                        }
-                    }
-                }
-            }
-
-            float[] vertexes = GenGridVertexes(grid);
-            VertexCount = vertexes.Length / 8;
-
-            GL.BufferData(BufferTarget.ArrayBuffer, Marshal.SizeOf<float>() * vertexes.Length, vertexes, BufferUsageHint.StaticDraw);
-
-            VertexArrayHandle = GL.GenVertexArray();
-            GL.BindVertexArray(VertexBufferHandle);
-            GL.BindBuffer(BufferTarget.ArrayBuffer, VertexBufferHandle);
-
-            // Position.
-            GL.EnableVertexAttribArray(0);
-            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, Marshal.SizeOf<float>() * 8, 0);
-
-            // Normal.
-            GL.EnableVertexAttribArray(1);
-            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 3);
-
-            // Tex coords.
-            GL.EnableVertexAttribArray(2);
-            GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 6);
-
-            GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
-
-            GL.BindVertexArray(0);
+            GenNearGrids();
+            GenNearGridMeshes();
 
             TextureHandle = GL.GenTexture();
             GL.ActiveTexture(TextureUnit.Texture0);
@@ -319,35 +171,37 @@ void main(void) {
             GL.Viewport(0, 0, Window.ClientSize.X, Window.ClientSize.Y);
         }
 
+        private static float PreviousFPS = 75;
+
         private static void Window_UpdateFrame(FrameEventArgs obj)
         {
             const float moveSpeed = 10f;
 
             if (Window.KeyboardState.IsKeyDown(Keys.A))
             {
-                Camera.Position -= Camera.GetRight() * (float)obj.Time * moveSpeed;
+                Camera.Position -= Camera.Right * (float)obj.Time * moveSpeed;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.D))
             {
-                Camera.Position += Camera.GetRight() * (float)obj.Time * moveSpeed;
+                Camera.Position += Camera.Right * (float)obj.Time * moveSpeed;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.W))
             {
-                Camera.Position += Camera.GetFront() * (float)obj.Time * moveSpeed;
+                Camera.Position += Camera.Front * (float)obj.Time * moveSpeed;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.S))
             {
-                Camera.Position -= Camera.GetFront() * (float)obj.Time * moveSpeed;
+                Camera.Position -= Camera.Front * (float)obj.Time * moveSpeed;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.R))
             {
-                Camera.Position += Camera.GetUp() * (float)obj.Time * moveSpeed;
+                Camera.Position += Camera.Up * (float)obj.Time * moveSpeed;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.F))
             {
-                Camera.Position -= Camera.GetUp() * (float)obj.Time * moveSpeed;
+                Camera.Position -= Camera.Up * (float)obj.Time * moveSpeed;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.Left))
@@ -361,25 +215,191 @@ void main(void) {
 
             if (Window.KeyboardState.IsKeyDown(Keys.Up))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Camera.GetRight(), (float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, (float)obj.Time) * Camera.Rotation;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.Down))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Camera.GetRight(), -(float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, -(float)obj.Time) * Camera.Rotation;
             }
 
             Camera.Rotation.Normalize();
+
+            if (Window.RenderTime > 0)
+            {
+                float fps = (float)(PreviousFPS * 0.9f + 1f / Window.RenderTime * 0.1f);
+                PreviousFPS = fps;
+            }
+
+            Window.Title = $"Cubach - {PreviousFPS.ToString("N2")} FPS";
+        }
+
+        private static Vector3 GetGridCenter(Vector3i gridPosition)
+        {
+            return WorldGen.GridSize * gridPosition + Vector3.One * WorldGen.GridSize / 2;
+        }
+
+        private static void GenGrid(Vector3i gridPosition)
+        {
+            if (World.Grids.ContainsKey(gridPosition))
+            {
+                return;
+            }
+
+            World.GenGrid(gridPosition);
+
+            Console.WriteLine($"Generated grid {gridPosition}");
+        }
+
+        private static void UnloadGrid(Vector3i gridPosition)
+        {
+            if (!World.Grids.ContainsKey(gridPosition))
+            {
+                return;
+            }
+
+            if (World.Grids.TryRemove(gridPosition, out Grid grid))
+            {
+                Console.WriteLine($"Unloaded grid {gridPosition}");
+            }
+        }
+
+        private static void GenGridMesh(Grid grid)
+        {
+            if (WorldMeshes.ContainsKey(grid.Position))
+            {
+                return;
+            }
+
+            WorldMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes());
+            WorldMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+
+            Console.WriteLine($"Generated grid mesh {grid.Position}");
+        }
+
+        private static void UnloadGridMesh(Vector3i gridPosition)
+        {
+            if (WorldMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> mesh))
+            {
+                WorldMeshes.Remove(gridPosition);
+                mesh.Dispose();
+
+                Console.WriteLine($"Unloaded grid mesh {gridPosition}");
+            }
+        }
+
+        private static void GenNearGrids()
+        {
+            var gridPositions = new List<Vector3i>(MAX_GRID_GEN_PER_FRAME);
+            Vector3i cameraPosition = (Vector3i)(Camera.Position / 16);
+            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / 16) / 3;
+            int n = 0;
+
+            for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
+            {
+                for (int j = cameraPosition.Y - genDistance; j < cameraPosition.Y + genDistance; ++j)
+                {
+                    for (int k = cameraPosition.Z - genDistance; k < cameraPosition.Z + genDistance; ++k)
+                    {
+                        var gridPosition = new Vector3i(i, j, k);
+                        if (World.Grids.ContainsKey(gridPosition))
+                        {
+                            continue;
+                        }
+
+                        Vector3 gridCenter = GetGridCenter(gridPosition);
+                        float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                        if (distance > GRID_GEN_DISTANCE)
+                        {
+                            continue;
+                        }
+
+                        if (n++ > MAX_GRID_GEN_PER_FRAME)
+                        {
+                            continue;
+                        }
+
+                        gridPositions.Add(gridPosition);
+                    }
+                }
+            }
+
+            if (gridPositions.Count > 0)
+            {
+                ThreadPool.QueueUserWorkItem((obj) =>
+                {
+                    foreach (Vector3i gridPosition in gridPositions)
+                    {
+                        GenGrid(gridPosition);
+                    }
+                });
+            }
+        }
+
+        private static void UnloadFarGrids()
+        {
+            foreach ((Vector3i gridPosition, Grid grid) in World.Grids)
+            {
+                Vector3 gridCenter = GetGridCenter(gridPosition);
+                float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                if (distance > GRID_UNLOAD_DISTANCE)
+                {
+                    UnloadGrid(gridPosition);
+                }
+            }
+        }
+
+        private static void GenNearGridMeshes()
+        {
+            int n = 0;
+
+            foreach ((Vector3i gridPosition, Grid grid) in World.Grids)
+            {
+                if (WorldMeshes.ContainsKey(gridPosition))
+                {
+                    continue;
+                }
+
+                Vector3 gridCenter = GetGridCenter(gridPosition);
+                float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                if (distance < MESH_GEN_DISTANCE)
+                {
+                    GenGridMesh(grid);
+
+                    if (n++ > MAX_MESH_GEN_PER_FRAME)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        private static void UnloadFarGridMeshes()
+        {
+            foreach ((Vector3i gridPosition, var mesh) in WorldMeshes)
+            {
+                Vector3 gridCenter = GetGridCenter(gridPosition);
+                float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                if (distance > MESH_UNLOAD_DISTANCE)
+                {
+                    UnloadGridMesh(gridPosition);
+                }
+            }
         }
 
         private static void Window_RenderFrame(FrameEventArgs obj)
         {
+            GenNearGrids();
+            UnloadFarGrids();
+
+            GenNearGridMeshes();
+            UnloadFarGridMeshes();
+
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             GL.UseProgram(ShaderProgramHandle);
-            Matrix4 View = Camera.GetViewMatrix();
-            Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 100);
-            Matrix4 ModelViewProjection = View * Projection;
-            GL.UniformMatrix4(0, false, ref ModelViewProjection);
+            Matrix4 View = Camera.ViewMatrix;
+            Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 1000);
+            Matrix4 ViewProjection = View * Projection;
 
             GL.Uniform1(1, 0);
             GL.Uniform3(2, new Vector3(0.2f, 1, 0.1f).Normalized());
@@ -387,16 +407,32 @@ void main(void) {
             GL.ActiveTexture(TextureUnit.Texture0);
             GL.BindTexture(TextureTarget.Texture2D, TextureHandle);
 
-            GL.BindVertexArray(VertexArrayHandle);
-            GL.DrawArrays(PrimitiveType.Triangles, 0, VertexCount);
+            foreach ((Vector3i gridPosition, var mesh) in WorldMeshes)
+            {
+                Vector3 gridCenter = GetGridCenter(gridPosition);
+                float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                if (distance > MAX_RENDER_DISTANCE)
+                {
+                    continue;
+                }
+
+                Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
+                Matrix4 ModelViewProjection = Model * ViewProjection;
+                GL.UniformMatrix4(0, false, ref ModelViewProjection);
+                mesh.Draw();
+            }
 
             Window.SwapBuffers();
         }
 
         private static void Window_Closed()
         {
-            GL.DeleteVertexArray(VertexArrayHandle);
-            GL.DeleteBuffer(VertexBufferHandle);
+            foreach (var mesh in WorldMeshes.Values)
+            {
+                mesh.Dispose();
+            }
+
+            GL.DeleteTexture(TextureHandle);
             GL.DeleteProgram(ShaderProgramHandle);
         }
     }

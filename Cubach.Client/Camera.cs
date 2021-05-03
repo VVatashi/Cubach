@@ -2,29 +2,37 @@
 
 namespace Cubach.Client
 {
-    public class Camera
+    public sealed class Camera
     {
         public Vector3 Position;
         public Quaternion Rotation;
 
-        public Vector3 GetFront()
+        public Camera(Vector3 position, Quaternion rotation)
         {
-            return Rotation * -Vector3.UnitZ;
+            Position = position;
+            Rotation = rotation;
         }
 
-        public Vector3 GetRight()
+        public Camera(Vector3 position) : this(position, Quaternion.Identity) { }
+
+        public Vector3 Front
         {
-            return Vector3.Cross(GetFront(), Vector3.UnitY);
+            get => Rotation * -Vector3.UnitZ;
         }
 
-        public Vector3 GetUp()
+        public Vector3 Right
         {
-            return Vector3.Cross(GetRight(), GetFront());
+            get => Vector3.Cross(Front, Vector3.UnitY);
         }
 
-        public Matrix4 GetViewMatrix()
+        public Vector3 Up
         {
-            return Matrix4.CreateTranslation(-Position) * Matrix4.CreateFromQuaternion(Rotation.Inverted());
+            get => Vector3.Cross(Right, Front);
+        }
+
+        public Matrix4 ViewMatrix
+        {
+            get => Matrix4.CreateTranslation(-Position) * Matrix4.CreateFromQuaternion(Rotation.Inverted());
         }
     }
 }

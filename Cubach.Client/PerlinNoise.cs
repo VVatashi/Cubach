@@ -44,7 +44,7 @@ namespace Cubach.Client
             return Coords.PolarToCartesian(1, t);
         }
 
-        public static float Noise(Vector2 position)
+        public static float Gen2(Vector2 position)
         {
             Vector2 p = new Vector2((int)Math.Floor(position.X), (int)Math.Floor(position.Y));
             Vector2 d = position - p;
