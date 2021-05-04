@@ -36,14 +36,15 @@ namespace Cubach.Client
         public static World World;
         public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
 
-        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
+        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
+        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
 
         public static int TextureHandle;
         public static int ShaderProgramHandle;
 
         public static void Main(string[] args)
         {
-            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings() { Title = "Cubach" }))
+            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings() { Title = "Cubach", Size = new Vector2i(1600, 900) }))
             {
                 Window.Load += Window_Load;
                 Window.Resize += Window_Resize;
@@ -92,6 +93,9 @@ namespace Cubach.Client
             GL.Enable(EnableCap.CullFace);
             GL.CullFace(CullFaceMode.Back);
 
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
             GL.Hint(HintTarget.PointSmoothHint, HintMode.Nicest);
             GL.Hint(HintTarget.LineSmoothHint, HintMode.Nicest);
             GL.Hint(HintTarget.PolygonSmoothHint, HintMode.Nicest);
@@ -120,6 +124,7 @@ namespace Cubach.Client
             using (var copy = new Bitmap(image.Width, image.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
             using (var graphics = Graphics.FromImage(copy))
             {
+                graphics.Clear(Color.Transparent);
                 graphics.DrawImage(image, 0, 0, image.Width, image.Height);
 
                 BitmapData data = copy.LockBits(new Rectangle(0, 0, image.Width, image.Height), ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
@@ -274,7 +279,7 @@ void main(void) {
 
         private static Vector3 GetGridCenter(Vector3i gridPosition)
         {
-            return WorldGen.GridSize * gridPosition + Vector3.One * WorldGen.GridSize / 2;
+            return WorldGen.GRID_SIZE * gridPosition + Vector3.One * WorldGen.GRID_SIZE / 2;
         }
 
         private static void GenGrid(Vector3i gridPosition)
@@ -304,25 +309,39 @@ void main(void) {
 
         private static void GenGridMesh(Grid grid)
         {
-            if (WorldMeshes.ContainsKey(grid.Position))
+            if (!WorldOpaqueMeshes.ContainsKey(grid.Position))
             {
-                return;
+                WorldOpaqueMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes());
+                WorldOpaqueMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+
+                Console.WriteLine($"Generated opaque grid mesh {grid.Position}");
             }
 
-            WorldMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes());
-            WorldMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+            if (!WorldTransparentMeshes.ContainsKey(grid.Position))
+            {
+                WorldTransparentMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes(opaque: false));
+                WorldTransparentMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
 
-            Console.WriteLine($"Generated grid mesh {grid.Position}");
+                Console.WriteLine($"Generated transparent grid mesh {grid.Position}");
+            }
         }
 
         private static void UnloadGridMesh(Vector3i gridPosition)
         {
-            if (WorldMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> mesh))
+            if (WorldOpaqueMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> opaqueMesh))
             {
-                WorldMeshes.Remove(gridPosition);
-                mesh.Dispose();
+                WorldOpaqueMeshes.Remove(gridPosition);
+                opaqueMesh.Dispose();
 
-                Console.WriteLine($"Unloaded grid mesh {gridPosition}");
+                Console.WriteLine($"Unloaded opaque grid mesh {gridPosition}");
+            }
+
+            if (WorldTransparentMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> transparentMesh))
+            {
+                WorldTransparentMeshes.Remove(gridPosition);
+                transparentMesh.Dispose();
+
+                Console.WriteLine($"Unloaded transparent grid mesh {gridPosition}");
             }
         }
 
@@ -331,8 +350,8 @@ void main(void) {
             const int minHeight = -1;
             const int maxHeight = 5;
 
-            Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GridSize);
-            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GridSize) / 3;
+            Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GRID_SIZE);
+            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GRID_SIZE) / 3;
 
             for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
             {
@@ -353,7 +372,8 @@ void main(void) {
                             continue;
                         }
 
-                        GridsToUpdate.Enqueue(gridPosition);
+                        // GridsToUpdate.Enqueue(gridPosition);
+                        GenGrid(gridPosition);
                     }
                 }
             }
@@ -383,7 +403,7 @@ void main(void) {
 
             foreach (Vector3i gridPosition in World.Grids.Keys)
             {
-                if (WorldMeshes.ContainsKey(gridPosition))
+                if (WorldOpaqueMeshes.ContainsKey(gridPosition))
                 {
                     continue;
                 }
@@ -418,7 +438,7 @@ void main(void) {
 
         private static void UnloadFarGridMeshes()
         {
-            foreach (Vector3i gridPosition in WorldMeshes.Keys)
+            foreach (Vector3i gridPosition in WorldOpaqueMeshes.Keys)
             {
                 Vector3 gridCenter = GetGridCenter(gridPosition);
                 float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
@@ -450,7 +470,7 @@ void main(void) {
             GL.ActiveTexture(TextureUnit.Texture0);
             GL.BindTexture(TextureTarget.Texture2D, TextureHandle);
 
-            foreach ((Vector3i gridPosition, var mesh) in WorldMeshes)
+            foreach ((Vector3i gridPosition, var mesh) in WorldOpaqueMeshes)
             {
                 Vector3 gridCenter = GetGridCenter(gridPosition);
                 float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
@@ -465,12 +485,53 @@ void main(void) {
                 mesh.Draw();
             }
 
+            var transparentMeshes = new List<(Vector3i, Mesh<VertexP3N3T2>)>();
+
+            foreach ((Vector3i gridPosition, var mesh) in WorldTransparentMeshes)
+            {
+                Vector3 gridCenter = GetGridCenter(gridPosition);
+                float distance = Coords.TaxicabDistance3(gridCenter, Camera.Position);
+                if (distance > MAX_RENDER_DISTANCE)
+                {
+                    continue;
+                }
+
+                if (mesh.Vertexes.Length != 0)
+                {
+                    transparentMeshes.Add((gridPosition, mesh));
+                }
+            }
+
+            transparentMeshes.Sort((a, b) =>
+            {
+                Vector3 aGridCenter = GetGridCenter(a.Item1);
+                Vector3 bGridCenter = GetGridCenter(b.Item1);
+
+                float aDistance = Coords.TaxicabDistance3(aGridCenter, Camera.Position);
+                float bDistance = Coords.TaxicabDistance3(bGridCenter, Camera.Position);
+
+                return MathF.Sign(bDistance - aDistance);
+            });
+
+            foreach ((Vector3i gridPosition, var mesh) in transparentMeshes)
+            {
+                Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
+                Matrix4 ModelViewProjection = Model * ViewProjection;
+                GL.UniformMatrix4(0, false, ref ModelViewProjection);
+                mesh.Draw();
+            }
+
             Window.SwapBuffers();
         }
 
         private static void Window_Closed()
         {
-            foreach (var mesh in WorldMeshes.Values)
+            foreach (var mesh in WorldOpaqueMeshes.Values)
+            {
+                mesh.Dispose();
+            }
+
+            foreach (var mesh in WorldTransparentMeshes.Values)
             {
                 mesh.Dispose();
             }

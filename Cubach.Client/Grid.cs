@@ -45,7 +45,7 @@ namespace Cubach.Client
             IsEmpty = true;
         }
 
-        public VertexP3N3T2[] GenVertexes()
+        public VertexP3N3T2[] GenVertexes(bool opaque = true)
         {
             if (IsEmpty)
             {
@@ -60,6 +60,12 @@ namespace Cubach.Client
                 {
                     for (int k = 0; k < Length; ++k)
                     {
+                        Block block = Blocks[i, j, k];
+                        if (block.Type.Opaque != opaque)
+                        {
+                            continue;
+                        }
+
                         Vector3i blockPosition = 16 * Position + new Vector3i(i, j, k);
 
                         BlockType leftBlockType = World.GetBlockTypeAt(blockPosition - Vector3i.UnitX);
@@ -71,16 +77,14 @@ namespace Cubach.Client
                         BlockType frontBlockType = World.GetBlockTypeAt(blockPosition - Vector3i.UnitZ);
                         BlockType backBlockType = World.GetBlockTypeAt(blockPosition + Vector3i.UnitZ);
 
-                        bool hasLeftBlock = leftBlockType != null && leftBlockType.GenGeometry;
-                        bool hasRightBlock = rightBlockType != null && rightBlockType.GenGeometry;
+                        bool hasLeftBlock = leftBlockType != null && leftBlockType.Opaque == opaque && leftBlockType.GenGeometry;
+                        bool hasRightBlock = rightBlockType != null && rightBlockType.Opaque == opaque && rightBlockType.GenGeometry;
 
-                        bool hasBottomBlock = bottomBlockType != null && bottomBlockType.GenGeometry;
-                        bool hasTopBlock = topBlockType != null && topBlockType.GenGeometry;
+                        bool hasBottomBlock = bottomBlockType != null && bottomBlockType.Opaque == opaque && bottomBlockType.GenGeometry;
+                        bool hasTopBlock = topBlockType != null && topBlockType.Opaque == opaque && topBlockType.GenGeometry;
 
-                        bool hasFrontBlock = frontBlockType != null && frontBlockType.GenGeometry;
-                        bool hasBackBlock = backBlockType != null && backBlockType.GenGeometry;
-
-                        Block block = Blocks[i, j, k];
+                        bool hasFrontBlock = frontBlockType != null && frontBlockType.Opaque == opaque && frontBlockType.GenGeometry;
+                        bool hasBackBlock = backBlockType != null && backBlockType.Opaque == opaque && backBlockType.GenGeometry;
 
                         if (!hasLeftBlock)
                         {

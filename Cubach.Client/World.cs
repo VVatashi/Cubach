@@ -1,7 +1,6 @@
 ﻿using OpenTK.Mathematics;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 
 namespace Cubach.Client
 {
@@ -24,11 +23,21 @@ namespace Cubach.Client
             return grid;
         }
 
+        public Grid GetGridAt(Vector3i gridPosition)
+        {
+            if (Grids.TryGetValue(gridPosition, out Grid grid))
+            {
+                return grid;
+            }
+
+            return null;
+        }
+
         public Block? GetBlockAt(Vector3i position)
         {
-            int gridX = (int)MathF.Floor((float)position.X / WorldGen.GridSize);
-            int gridY = (int)MathF.Floor((float)position.Y / WorldGen.GridSize);
-            int gridZ = (int)MathF.Floor((float)position.Z / WorldGen.GridSize);
+            int gridX = (int)MathF.Floor((float)position.X / WorldGen.GRID_SIZE);
+            int gridY = (int)MathF.Floor((float)position.Y / WorldGen.GRID_SIZE);
+            int gridZ = (int)MathF.Floor((float)position.Z / WorldGen.GRID_SIZE);
 
             var gridPosition = new Vector3i(gridX, gridY, gridZ);
             if (!Grids.ContainsKey(gridPosition))
@@ -38,9 +47,9 @@ namespace Cubach.Client
 
             Grid grid = Grids[gridPosition];
 
-            int blockX = position.X - gridX * WorldGen.GridSize;
-            int blockY = position.Y - gridY * WorldGen.GridSize;
-            int blockZ = position.Z - gridZ * WorldGen.GridSize;
+            int blockX = position.X - gridX * WorldGen.GRID_SIZE;
+            int blockY = position.Y - gridY * WorldGen.GRID_SIZE;
+            int blockZ = position.Z - gridZ * WorldGen.GRID_SIZE;
 
             return grid.GetBlockAt(new Vector3i(blockX, blockY, blockZ));
         }
@@ -50,6 +59,32 @@ namespace Cubach.Client
             Block? block = GetBlockAt(position);
 
             return block.HasValue ? block.Value.Type : null;
+        }
+
+        public void SetBlockAt(Vector3i position, Block block, bool update = true)
+        {
+            int gridX = (int)MathF.Floor((float)position.X / WorldGen.GRID_SIZE);
+            int gridY = (int)MathF.Floor((float)position.Y / WorldGen.GRID_SIZE);
+            int gridZ = (int)MathF.Floor((float)position.Z / WorldGen.GRID_SIZE);
+
+            var gridPosition = new Vector3i(gridX, gridY, gridZ);
+            if (!Grids.ContainsKey(gridPosition))
+            {
+                GenGrid(gridPosition);
+            }
+
+            Grid grid = Grids[gridPosition];
+
+            int blockX = position.X - gridX * WorldGen.GRID_SIZE;
+            int blockY = position.Y - gridY * WorldGen.GRID_SIZE;
+            int blockZ = position.Z - gridZ * WorldGen.GRID_SIZE;
+
+            grid.Blocks[blockX, blockY, blockZ] = block;
+
+            if (update)
+            {
+                grid.UpdateIsEmpty();
+            }
         }
     }
 }
