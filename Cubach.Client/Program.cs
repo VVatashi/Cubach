@@ -15,8 +15,8 @@ namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 1024f - 64f;
-        private const float GRID_UNLOAD_DISTANCE = 1024f;
+        private const float GRID_GEN_DISTANCE = 512f - 64f;
+        private const float GRID_UNLOAD_DISTANCE = 512f;
 
         private const float MESH_GEN_DISTANCE = 512f - 64f;
         private const float MESH_UNLOAD_DISTANCE = 512f;
@@ -39,8 +39,10 @@ namespace Cubach.Client
         public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
         public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
 
+        public static ShaderProgram WorldShader;
+        public static ShaderProgram LineShader;
         public static int TextureHandle;
-        public static int ShaderProgramHandle;
+        public static Mesh<VertexP3C4> Lines;
 
         public static void Main(string[] args)
         {
@@ -134,10 +136,7 @@ namespace Cubach.Client
 
             GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
 
-            ShaderProgramHandle = GL.CreateProgram();
-
-            int vertexShaderHandle = GL.CreateShader(ShaderType.VertexShader);
-            GL.ShaderSource(vertexShaderHandle, @"#version 400
+            string vertexShaderSource = @"#version 400
 #extension GL_ARB_explicit_uniform_location : enable
 
 layout (location = 0) uniform mat4 mvp;
@@ -155,17 +154,9 @@ void main(void) {
   frag_normal = in_normal;
   frag_texCoord = in_texCoord;
   gl_Position = mvp * vec4(in_position, 1);
-}");
-            GL.CompileShader(vertexShaderHandle);
+}";
 
-            GL.GetShader(vertexShaderHandle, ShaderParameter.CompileStatus, out int vertexShaderStatus);
-            if (vertexShaderStatus == 0)
-            {
-                Console.WriteLine(GL.GetShaderInfoLog(vertexShaderHandle));
-            }
-
-            int fragmentShaderHandle = GL.CreateShader(ShaderType.FragmentShader);
-            GL.ShaderSource(fragmentShaderHandle, @"#version 400
+            string fragmentShaderSource = @"#version 400
 #extension GL_ARB_explicit_uniform_location : enable
 
 layout (location = 1) uniform sampler2D colorTexture;
@@ -181,26 +172,76 @@ void main(void) {
   vec3 ambient = vec3(0.5);
   vec3 diffuse = max(0, dot(light, frag_normal)) * vec3(0.5);
   out_color = vec4(ambient + diffuse, 1) * texture(colorTexture, frag_texCoord);
-}");
-            GL.CompileShader(fragmentShaderHandle);
+}";
 
-            GL.GetShader(fragmentShaderHandle, ShaderParameter.CompileStatus, out int fragmentShaderStatus);
-            if (fragmentShaderStatus == 0)
+            using var vertexShader = new Shader(ShaderType.VertexShader);
+            if (!vertexShader.Compile(vertexShaderSource))
             {
-                Console.WriteLine(GL.GetShaderInfoLog(fragmentShaderHandle));
+                Console.WriteLine(vertexShader.GetError());
             }
 
-            GL.AttachShader(ShaderProgramHandle, vertexShaderHandle);
-            GL.AttachShader(ShaderProgramHandle, fragmentShaderHandle);
-            GL.LinkProgram(ShaderProgramHandle);
-
-            GL.GetProgram(ShaderProgramHandle, GetProgramParameterName.LinkStatus, out int shaderProgramStatus);
-            if (shaderProgramStatus == 0)
+            using var fragmentShader = new Shader(ShaderType.FragmentShader);
+            if (!fragmentShader.Compile(fragmentShaderSource))
             {
-                Console.WriteLine(GL.GetProgramInfoLog(ShaderProgramHandle));
+                Console.WriteLine(fragmentShader.GetError());
             }
 
-            GL.DeleteShader(vertexShaderHandle);
+            WorldShader = new ShaderProgram();
+            WorldShader.Attach(vertexShader);
+            WorldShader.Attach(fragmentShader);
+            if (!WorldShader.Link())
+            {
+                Console.WriteLine(WorldShader.GetError());
+            }
+
+            string lineVertexShaderSource = @"#version 400
+#extension GL_ARB_explicit_uniform_location : enable
+
+layout (location = 0) uniform mat4 mvp;
+
+layout (location = 0) in vec3 in_position;
+layout (location = 1) in vec4 in_color;
+
+out vec4 frag_color;
+
+void main(void) {
+  frag_color = in_color;
+  gl_Position = mvp * vec4(in_position, 1);
+}";
+
+            string lineFragmentShaderSource = @"#version 400
+#extension GL_ARB_explicit_uniform_location : enable
+
+in vec4 frag_color;
+
+layout (location = 0) out vec4 out_color;
+
+void main(void) {
+  out_color = frag_color;
+}";
+
+            using var lineVertexShader = new Shader(ShaderType.VertexShader);
+            if (!lineVertexShader.Compile(lineVertexShaderSource))
+            {
+                Console.WriteLine(lineVertexShader.GetError());
+            }
+
+            using var lineFragmentShader = new Shader(ShaderType.FragmentShader);
+            if (!lineFragmentShader.Compile(lineFragmentShaderSource))
+            {
+                Console.WriteLine(lineFragmentShader.GetError());
+            }
+
+            LineShader = new ShaderProgram();
+            LineShader.Attach(lineVertexShader);
+            LineShader.Attach(lineFragmentShader);
+            if (!LineShader.Link())
+            {
+                Console.WriteLine(LineShader.GetError());
+            }
+
+            Lines = new Mesh<VertexP3C4>(new VertexP3C4[] { });
+            Lines.SetVertexAttribs(VertexP3C4.VertexAttribs);
 
             GL.Viewport(0, 0, Window.ClientSize.X, Window.ClientSize.Y);
         }
@@ -372,8 +413,7 @@ void main(void) {
                             continue;
                         }
 
-                        // GridsToUpdate.Enqueue(gridPosition);
-                        GenGrid(gridPosition);
+                        GridsToUpdate.Enqueue(gridPosition);
                     }
                 }
             }
@@ -449,6 +489,111 @@ void main(void) {
             }
         }
 
+        private static Vector3 GetPerpendicular(Vector3 v)
+        {
+            if (v.Z != 0 && -v.X != v.Y)
+            {
+                return new Vector3(v.Z, v.Z, -v.X - v.Y);
+            }
+            else
+            {
+                return new Vector3(-v.Y - v.Z, v.X, v.X);
+            }
+        }
+
+        private static VertexP3C4[] GenLineVertexes(Vector3 a, Vector3 b, Color4 color, float width = 1f)
+        {
+            Vector3 d = (b - a).Normalized();
+            Vector3 p1 = GetPerpendicular(d);
+            Vector3 p2 = Vector3.Cross(d, p1);
+
+            p1 *= (width / 2);
+            p2 *= (width / 2);
+
+            return new[] {
+                new VertexP3C4(a + p1, color),
+                new VertexP3C4(b + p1, color),
+                new VertexP3C4(b - p1, color),
+
+                new VertexP3C4(a + p1, color),
+                new VertexP3C4(b - p1, color),
+                new VertexP3C4(a - p1, color),
+
+                new VertexP3C4(a + p2, color),
+                new VertexP3C4(b + p2, color),
+                new VertexP3C4(b - p2, color),
+
+                new VertexP3C4(a + p2, color),
+                new VertexP3C4(b - p2, color),
+                new VertexP3C4(a - p2, color),
+            };
+        }
+
+        private static Grid RaycastGrid(World world, Ray ray, float minDistance, float maxDistance, out Vector3 intersection)
+        {
+            Grid result = null;
+            float sqrIntersectionDistance = maxDistance * maxDistance;
+            intersection = Vector3.Zero;
+
+            foreach ((Vector3i gridPosition, Grid grid) in world.Grids)
+            {
+                if (grid.IsEmpty)
+                {
+                    continue;
+                }
+
+                var gridAABB = new AABB(16 * gridPosition, 16 * (gridPosition + Vector3.One));
+                if (CollisionDetection.RayAABBIntersection3(gridAABB, ray, out Vector3 gridIntersection))
+                {
+                    float sqrDistance = (gridIntersection - ray.Origin).LengthSquared;
+                    if (sqrDistance > minDistance * minDistance && sqrDistance < sqrIntersectionDistance)
+                    {
+                        result = grid;
+                        sqrIntersectionDistance = sqrDistance;
+                        intersection = gridIntersection;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static Block? RaycastBlock(Grid grid, Ray ray, out Vector3 intersection, out Vector3i blockPosition)
+        {
+            Block? result = null;
+            float sqrIntersectionDistance = float.MaxValue;
+            intersection = Vector3.Zero;
+            blockPosition = new Vector3i();
+
+            for (int i = 0; i < WorldGen.GRID_SIZE; ++i)
+            {
+                for (int j = 0; j < WorldGen.GRID_SIZE; ++j)
+                {
+                    for (int k = 0; k < WorldGen.GRID_SIZE; ++k)
+                    {
+                        Block? block = grid.GetBlockAt(new Vector3i(i, j, k));
+                        if (block.HasValue && block.Value.Type.Solid)
+                        {
+                            var blockAABB = new AABB(16 * grid.Position + new Vector3(i, j, k), 16 * grid.Position + new Vector3(i + 1, j + 1, k + 1));
+                            if (CollisionDetection.RayAABBIntersection3(blockAABB, ray, out Vector3 blockIntersection))
+                            {
+                                float sqrDistance = (blockIntersection - ray.Origin).LengthSquared;
+                                if (sqrDistance < sqrIntersectionDistance)
+                                {
+                                    result = block;
+                                    sqrIntersectionDistance = sqrDistance;
+                                    intersection = blockIntersection;
+                                    blockPosition = 16 * grid.Position + new Vector3i(i, j, k);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+
         private static void Window_RenderFrame(FrameEventArgs obj)
         {
             GenNearGrids();
@@ -459,9 +604,10 @@ void main(void) {
 
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-            GL.UseProgram(ShaderProgramHandle);
+            WorldShader.Use();
+
             Matrix4 View = Camera.ViewMatrix;
-            Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 1000);
+            Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 512f);
             Matrix4 ViewProjection = View * Projection;
 
             GL.Uniform1(1, 0);
@@ -496,7 +642,7 @@ void main(void) {
                     continue;
                 }
 
-                if (mesh.Vertexes.Length != 0)
+                if (mesh.VertexCount != 0)
                 {
                     transparentMeshes.Add((gridPosition, mesh));
                 }
@@ -521,6 +667,54 @@ void main(void) {
                 mesh.Draw();
             }
 
+            GL.Disable(EnableCap.CullFace);
+
+            LineShader.Use();
+            GL.UniformMatrix4(0, false, ref ViewProjection);
+
+            var lineVertexes = new List<VertexP3C4>();
+            var ray = new Ray(Camera.Position, Camera.Front);
+            float minDistance = 0f;
+            float maxDistance = 128f;
+            while (minDistance < maxDistance)
+            {
+                Grid grid = RaycastGrid(World, ray, minDistance, maxDistance, out Vector3 gridIntersection);
+                if (grid == null)
+                {
+                    break;
+                }
+
+                Block? block = RaycastBlock(grid, ray, out Vector3 blockIntersection, out Vector3i blockPosition);
+                if (block.HasValue)
+                {
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 0), blockPosition + new Vector3(1, 0, 0), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 0), blockPosition + new Vector3(1, 1, 0), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 0), blockPosition + new Vector3(0, 1, 0), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 0), blockPosition + new Vector3(0, 0, 0), Color4.LightGray, 0.025f));
+
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 1), blockPosition + new Vector3(1, 0, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 1), blockPosition + new Vector3(1, 1, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 1), blockPosition + new Vector3(0, 1, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 1), blockPosition + new Vector3(0, 0, 1), Color4.LightGray, 0.025f));
+
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 0), blockPosition + new Vector3(0, 0, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 0), blockPosition + new Vector3(1, 0, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 0), blockPosition + new Vector3(1, 1, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 0), blockPosition + new Vector3(0, 1, 1), Color4.LightGray, 0.025f));
+                    break;
+                }
+
+                minDistance = (gridIntersection - ray.Origin).Length + 0.1f;
+            }
+
+            if (lineVertexes.Count > 0)
+            {
+                Lines.SetData(lineVertexes.ToArray(), BufferUsageHint.DynamicDraw);
+                Lines.Draw();
+            }
+
+            GL.Enable(EnableCap.CullFace);
+
             Window.SwapBuffers();
         }
 
@@ -537,7 +731,11 @@ void main(void) {
             }
 
             GL.DeleteTexture(TextureHandle);
-            GL.DeleteProgram(ShaderProgramHandle);
+
+            WorldShader.Dispose();
+            LineShader.Dispose();
+
+            Lines.Dispose();
         }
     }
 }

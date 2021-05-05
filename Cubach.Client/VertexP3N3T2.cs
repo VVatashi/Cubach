@@ -12,9 +12,9 @@ namespace Cubach.Client
         public Vector2 TexCoords;
 
         public static readonly VertexAttrib[] VertexAttribs = new[] {
-            new VertexAttrib(0, 3, VertexAttribPointerType.Float, false, Marshal.SizeOf<float>() * 8, 0),
-            new VertexAttrib(1, 3, VertexAttribPointerType.Float, true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 3),
-            new VertexAttrib(2, 2, VertexAttribPointerType.Float, true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 6),
+            new VertexAttrib(0, 3, VertexAttribPointerType.Float, normalized: false, Marshal.SizeOf<float>() * 8, 0),
+            new VertexAttrib(1, 3, VertexAttribPointerType.Float, normalized: true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 3),
+            new VertexAttrib(2, 2, VertexAttribPointerType.Float, normalized: true, Marshal.SizeOf<float>() * 8, Marshal.SizeOf<float>() * 6),
         };
 
         public VertexP3N3T2(Vector3 position, Vector3 normal, Vector2 texCoords)

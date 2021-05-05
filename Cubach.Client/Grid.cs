@@ -124,7 +124,8 @@ namespace Cubach.Client
 
         public Block? GetBlockAt(Vector3i position)
         {
-            if (position.X < 0 || position.Y < 0 || position.Z < 0 || position.X > Width || position.Y > Height || position.Z > Length)
+            if (position.X < 0 || position.Y < 0 || position.Z < 0
+                || position.X >= Width || position.Y >= Height || position.Z >= Length)
             {
                 return null;
             }
