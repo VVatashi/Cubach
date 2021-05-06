@@ -15,13 +15,13 @@ namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 384f - 128f;
-        private const float GRID_UNLOAD_DISTANCE = 384f;
+        private const float GRID_GEN_DISTANCE = 512f - 128f;
+        private const float GRID_UNLOAD_DISTANCE = 512f;
 
-        private const float MESH_GEN_DISTANCE = 384f - 128f;
-        private const float MESH_UNLOAD_DISTANCE = 384f;
+        private const float MESH_GEN_DISTANCE = 512f - 128f;
+        private const float MESH_UNLOAD_DISTANCE = 512f;
 
-        private const float MAX_RENDER_DISTANCE = 384f;
+        private const float MAX_RENDER_DISTANCE = 512f;
 
         private const int MAX_MESH_GEN_PER_FRAME = 8;
 

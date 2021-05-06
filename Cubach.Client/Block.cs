@@ -33,13 +33,13 @@ namespace Cubach.Client
             float v2 = (Type.TextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(-1, 0, 0), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z), new Vector3(-1, 0, 0), new Vector2(u1, v1)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z + 1), new Vector3(-1, 0, 0), new Vector2(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(-1, 0, 0), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z), new Vector3h(-1, 0, 0), new Vector2h(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z + 1), new Vector3h(-1, 0, 0), new Vector2h(u2, v1)),
 
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(-1, 0, 0), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z + 1), new Vector3(-1, 0, 0), new Vector2(u2, v1)),
-                new VertexP3N3T2(new Vector3(x, y, z + 1), new Vector3(-1, 0, 0), new Vector2(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(-1, 0, 0), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z + 1), new Vector3h(-1, 0, 0), new Vector2h(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x, y, z + 1), new Vector3h(-1, 0, 0), new Vector2h(u2, v2)),
             };
         }
 
@@ -56,13 +56,13 @@ namespace Cubach.Client
             float v2 = (Type.TextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x + 1, y, z), new Vector3(1, 0, 0), new Vector2(u2, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(1, 0, 0), new Vector2(u1, v1)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z), new Vector3(1, 0, 0), new Vector2(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z), new Vector3h(1, 0, 0), new Vector2h(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(1, 0, 0), new Vector2h(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z), new Vector3h(1, 0, 0), new Vector2h(u2, v1)),
 
-                new VertexP3N3T2(new Vector3(x + 1, y, z), new Vector3(1, 0, 0), new Vector2(u2, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z + 1), new Vector3(1, 0, 0), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(1, 0, 0), new Vector2(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z), new Vector3h(1, 0, 0), new Vector2h(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z + 1), new Vector3h(1, 0, 0), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(1, 0, 0), new Vector2h(u1, v1)),
             };
         }
 
@@ -79,13 +79,13 @@ namespace Cubach.Client
             float topV2 = (Type.TopTextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x, y + 1, z), new Vector3(0, 1, 0), new Vector2(topU1, topV1)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z), new Vector3(0, 1, 0), new Vector2(topU2, topV1)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(0, 1, 0), new Vector2(topU2, topV2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z), new Vector3h(0, 1, 0), new Vector2h(topU1, topV1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z), new Vector3h(0, 1, 0), new Vector2h(topU2, topV1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(0, 1, 0), new Vector2h(topU2, topV2)),
 
-                new VertexP3N3T2(new Vector3(x, y + 1, z), new Vector3(0, 1, 0), new Vector2(topU1, topV1)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(0, 1, 0), new Vector2(topU2, topV2)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z + 1), new Vector3(0, 1, 0), new Vector2(topU1, topV2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z), new Vector3h(0, 1, 0), new Vector2h(topU1, topV1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(0, 1, 0), new Vector2h(topU2, topV2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z + 1), new Vector3h(0, 1, 0), new Vector2h(topU1, topV2)),
             };
         }
 
@@ -102,13 +102,13 @@ namespace Cubach.Client
             float bottomV2 = (Type.BottomTextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(0, -1, 0), new Vector2(bottomU1, bottomV1)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z + 1), new Vector3(0, -1, 0), new Vector2(bottomU2, bottomV2)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z), new Vector3(0, -1, 0), new Vector2(bottomU2, bottomV1)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(0, -1, 0), new Vector2h(bottomU1, bottomV1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z + 1), new Vector3h(0, -1, 0), new Vector2h(bottomU2, bottomV2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z), new Vector3h(0, -1, 0), new Vector2h(bottomU2, bottomV1)),
 
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(0, -1, 0), new Vector2(bottomU1, bottomV1)),
-                new VertexP3N3T2(new Vector3(x, y, z + 1), new Vector3(0, -1, 0), new Vector2(bottomU1, bottomV2)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z + 1), new Vector3(0, -1, 0), new Vector2(bottomU2, bottomV2)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(0, -1, 0), new Vector2h(bottomU1, bottomV1)),
+                new VertexP3N3T2(new Vector3h(x, y, z + 1), new Vector3h(0, -1, 0), new Vector2h(bottomU1, bottomV2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z + 1), new Vector3h(0, -1, 0), new Vector2h(bottomU2, bottomV2)),
             };
         }
 
@@ -125,13 +125,13 @@ namespace Cubach.Client
             float v2 = (Type.TextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(0, 0, -1), new Vector2(u2, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z), new Vector3(0, 0, -1), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z), new Vector3(0, 0, -1), new Vector2(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(0, 0, -1), new Vector2h(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z), new Vector3h(0, 0, -1), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z), new Vector3h(0, 0, -1), new Vector2h(u1, v1)),
 
-                new VertexP3N3T2(new Vector3(x, y, z), new Vector3(0, 0, -1), new Vector2(u2, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z), new Vector3(0, 0, -1), new Vector2(u1, v1)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z), new Vector3(0, 0, -1), new Vector2(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x, y, z), new Vector3h(0, 0, -1), new Vector2h(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z), new Vector3h(0, 0, -1), new Vector2h(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z), new Vector3h(0, 0, -1), new Vector2h(u2, v1)),
             };
         }
 
@@ -148,13 +148,13 @@ namespace Cubach.Client
             float v2 = (Type.TextureId / 16 + 1) / 16f;
 
             return new VertexP3N3T2[] {
-                new VertexP3N3T2(new Vector3(x, y, z + 1), new Vector3(0, 0, 1), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(0, 0, 1), new Vector2(u2, v1)),
-                new VertexP3N3T2(new Vector3(x + 1, y, z + 1), new Vector3(0, 0, 1), new Vector2(u2, v2)),
+                new VertexP3N3T2(new Vector3h(x, y, z + 1), new Vector3h(0, 0, 1), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(0, 0, 1), new Vector2h(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y, z + 1), new Vector3h(0, 0, 1), new Vector2h(u2, v2)),
 
-                new VertexP3N3T2(new Vector3(x, y, z + 1), new Vector3(0, 0, 1), new Vector2(u1, v2)),
-                new VertexP3N3T2(new Vector3(x, y + 1, z + 1), new Vector3(0, 0, 1), new Vector2(u1, v1)),
-                new VertexP3N3T2(new Vector3(x + 1, y + 1, z + 1), new Vector3(0, 0, 1), new Vector2(u2, v1)),
+                new VertexP3N3T2(new Vector3h(x, y, z + 1), new Vector3h(0, 0, 1), new Vector2h(u1, v2)),
+                new VertexP3N3T2(new Vector3h(x, y + 1, z + 1), new Vector3h(0, 0, 1), new Vector2h(u1, v1)),
+                new VertexP3N3T2(new Vector3h(x + 1, y + 1, z + 1), new Vector3h(0, 0, 1), new Vector2h(u2, v1)),
             };
         }
     }
