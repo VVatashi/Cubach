@@ -15,7 +15,7 @@ namespace Cubach.Client
             WorldGen = worldGen;
         }
 
-        public Grid GenGrid(Vector3i gridPosition)
+        public Grid GenGridAt(Vector3i gridPosition)
         {
             Grid grid = WorldGen.GenGrid(this, gridPosition);
             Grids.TryAdd(gridPosition, grid);
@@ -70,7 +70,7 @@ namespace Cubach.Client
             var gridPosition = new Vector3i(gridX, gridY, gridZ);
             if (!Grids.ContainsKey(gridPosition))
             {
-                GenGrid(gridPosition);
+                GenGridAt(gridPosition);
             }
 
             Grid grid = Grids[gridPosition];
@@ -85,6 +85,38 @@ namespace Cubach.Client
             {
                 grid.UpdateIsEmpty();
             }
+        }
+
+        public Grid RaycastGrid(Ray ray, float minDistance, float maxDistance, out Vector3 intersection)
+        {
+            float distance = minDistance;
+            while (distance < maxDistance)
+            {
+                Vector3 position = ray.Origin + ray.Direction * distance;
+                Vector3i gridPosition = new Vector3i((int)Math.Floor(position.X / 16), (int)Math.Floor(position.Y / 16), (int)Math.Floor(position.Z / 16));
+                Grid grid = GetGridAt(gridPosition);
+                if (grid == null)
+                {
+                    break;
+                }
+
+                AABB gridAABB = new AABB(16 * grid.Position, 16 * grid.Position + grid.Size);
+                if (!CollisionDetection.RayAABBIntersection3(gridAABB, ray, out Vector3 nearIntersection, out Vector3 farIntersection))
+                {
+                    break;
+                }
+
+                if (!grid.IsEmpty)
+                {
+                    intersection = farIntersection;
+                    return grid;
+                }
+
+                distance = (farIntersection - ray.Origin).Length + 10e-3f;
+            }
+
+            intersection = Vector3.Zero;
+            return null;
         }
     }
 }

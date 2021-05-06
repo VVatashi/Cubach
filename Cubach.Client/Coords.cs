@@ -31,5 +31,17 @@ namespace Cubach.Client
         {
             return Math.Abs(b.X - a.X) + Math.Abs(b.Y - a.Y) + Math.Abs(b.Z - a.Z);
         }
+
+        public static Vector3 GetPerpendicular(Vector3 v)
+        {
+            if (v.Z != 0 && -v.X != v.Y)
+            {
+                return new Vector3(v.Z, v.Z, -v.X - v.Y);
+            }
+            else
+            {
+                return new Vector3(-v.Y - v.Z, v.X, v.X);
+            }
+        }
     }
 }

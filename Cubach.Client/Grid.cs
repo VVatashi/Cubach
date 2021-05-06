@@ -1,4 +1,5 @@
 ﻿using OpenTK.Mathematics;
+using System;
 using System.Collections.Generic;
 
 namespace Cubach.Client
@@ -138,6 +139,35 @@ namespace Cubach.Client
             Block? block = GetBlockAt(position);
 
             return block.HasValue ? block.Value.Type : null;
+        }
+
+        public Block? RaycastBlock(Ray ray, out Vector3 intersection, out Vector3i blockPosition)
+        {
+            float distance = 0;
+            while (distance < 1.75f * WorldGen.GRID_SIZE)
+            {
+                Vector3 position = ray.Origin + ray.Direction * distance;
+                blockPosition = new Vector3i((int)Math.Floor(position.X), (int)Math.Floor(position.Y), (int)Math.Floor(position.Z));
+                AABB blockAABB = new AABB(blockPosition, blockPosition + new Vector3i(1, 1, 1));
+                if (!CollisionDetection.RayAABBIntersection3(blockAABB, ray, out Vector3 nearIntersection, out Vector3 farIntersection))
+                {
+                    break;
+                }
+
+                Block? block = GetBlockAt(blockPosition - 16 * Position);
+                if (block.HasValue && block.Value.Type.Solid)
+                {
+                    intersection = nearIntersection;
+                    return block;
+                }
+
+                distance = (farIntersection - ray.Origin).Length + 10e-3f;
+            }
+
+            intersection = Vector3.Zero;
+            blockPosition = new Vector3i(0, 0, 0);
+
+            return null;
         }
     }
 }

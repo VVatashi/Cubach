@@ -15,13 +15,13 @@ namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 512f - 64f;
-        private const float GRID_UNLOAD_DISTANCE = 512f;
+        private const float GRID_GEN_DISTANCE = 384f - 128f;
+        private const float GRID_UNLOAD_DISTANCE = 384f;
 
-        private const float MESH_GEN_DISTANCE = 512f - 64f;
-        private const float MESH_UNLOAD_DISTANCE = 512f;
+        private const float MESH_GEN_DISTANCE = 384f - 128f;
+        private const float MESH_UNLOAD_DISTANCE = 384f;
 
-        private const float MAX_RENDER_DISTANCE = 512f;
+        private const float MAX_RENDER_DISTANCE = 384f;
 
         private const int MAX_MESH_GEN_PER_FRAME = 8;
 
@@ -330,7 +330,7 @@ void main(void) {
                 return;
             }
 
-            World.GenGrid(gridPosition);
+            World.GenGridAt(gridPosition);
 
             Console.WriteLine($"Generated grid {gridPosition}");
         }
@@ -392,7 +392,7 @@ void main(void) {
             const int maxHeight = 5;
 
             Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GRID_SIZE);
-            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GRID_SIZE) / 3;
+            int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GRID_SIZE);
 
             for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
             {
@@ -489,22 +489,10 @@ void main(void) {
             }
         }
 
-        private static Vector3 GetPerpendicular(Vector3 v)
-        {
-            if (v.Z != 0 && -v.X != v.Y)
-            {
-                return new Vector3(v.Z, v.Z, -v.X - v.Y);
-            }
-            else
-            {
-                return new Vector3(-v.Y - v.Z, v.X, v.X);
-            }
-        }
-
         private static VertexP3C4[] GenLineVertexes(Vector3 a, Vector3 b, Color4 color, float width = 1f)
         {
             Vector3 d = (b - a).Normalized();
-            Vector3 p1 = GetPerpendicular(d);
+            Vector3 p1 = Coords.GetPerpendicular(d);
             Vector3 p2 = Vector3.Cross(d, p1);
 
             p1 *= (width / 2);
@@ -527,71 +515,6 @@ void main(void) {
                 new VertexP3C4(b - p2, color),
                 new VertexP3C4(a - p2, color),
             };
-        }
-
-        private static Grid RaycastGrid(World world, Ray ray, float minDistance, float maxDistance, out Vector3 intersection)
-        {
-            Grid result = null;
-            float sqrIntersectionDistance = maxDistance * maxDistance;
-            intersection = Vector3.Zero;
-
-            foreach ((Vector3i gridPosition, Grid grid) in world.Grids)
-            {
-                if (grid.IsEmpty)
-                {
-                    continue;
-                }
-
-                var gridAABB = new AABB(16 * gridPosition, 16 * (gridPosition + Vector3.One));
-                if (CollisionDetection.RayAABBIntersection3(gridAABB, ray, out Vector3 gridIntersection))
-                {
-                    float sqrDistance = (gridIntersection - ray.Origin).LengthSquared;
-                    if (sqrDistance > minDistance * minDistance && sqrDistance < sqrIntersectionDistance)
-                    {
-                        result = grid;
-                        sqrIntersectionDistance = sqrDistance;
-                        intersection = gridIntersection;
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        private static Block? RaycastBlock(Grid grid, Ray ray, out Vector3 intersection, out Vector3i blockPosition)
-        {
-            Block? result = null;
-            float sqrIntersectionDistance = float.MaxValue;
-            intersection = Vector3.Zero;
-            blockPosition = new Vector3i();
-
-            for (int i = 0; i < WorldGen.GRID_SIZE; ++i)
-            {
-                for (int j = 0; j < WorldGen.GRID_SIZE; ++j)
-                {
-                    for (int k = 0; k < WorldGen.GRID_SIZE; ++k)
-                    {
-                        Block? block = grid.GetBlockAt(new Vector3i(i, j, k));
-                        if (block.HasValue && block.Value.Type.Solid)
-                        {
-                            var blockAABB = new AABB(16 * grid.Position + new Vector3(i, j, k), 16 * grid.Position + new Vector3(i + 1, j + 1, k + 1));
-                            if (CollisionDetection.RayAABBIntersection3(blockAABB, ray, out Vector3 blockIntersection))
-                            {
-                                float sqrDistance = (blockIntersection - ray.Origin).LengthSquared;
-                                if (sqrDistance < sqrIntersectionDistance)
-                                {
-                                    result = block;
-                                    sqrIntersectionDistance = sqrDistance;
-                                    intersection = blockIntersection;
-                                    blockPosition = 16 * grid.Position + new Vector3i(i, j, k);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            return result;
         }
 
         private static void Window_RenderFrame(FrameEventArgs obj)
@@ -678,13 +601,13 @@ void main(void) {
             float maxDistance = 128f;
             while (minDistance < maxDistance)
             {
-                Grid grid = RaycastGrid(World, ray, minDistance, maxDistance, out Vector3 gridIntersection);
+                Grid grid = World.RaycastGrid(ray, minDistance, maxDistance, out Vector3 gridIntersection);
                 if (grid == null)
                 {
                     break;
                 }
 
-                Block? block = RaycastBlock(grid, ray, out Vector3 blockIntersection, out Vector3i blockPosition);
+                Block? block = grid.RaycastBlock(ray, out Vector3 blockIntersection, out Vector3i blockPosition);
                 if (block.HasValue)
                 {
                     lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 0), blockPosition + new Vector3(1, 0, 0), Color4.LightGray, 0.025f));
