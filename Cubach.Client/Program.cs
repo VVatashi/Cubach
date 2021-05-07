@@ -7,9 +7,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Linq;
+using System.IO;
 using System.Threading;
+using GDIPixelFormat = System.Drawing.Imaging.PixelFormat;
 
 namespace Cubach.Client
 {
@@ -23,12 +23,19 @@ namespace Cubach.Client
 
         private const float MAX_RENDER_DISTANCE = 512f;
 
-        private const int MAX_MESH_GEN_PER_FRAME = 8;
-
         public static bool Exiting = false;
+
+        [ThreadStatic]
+        public static readonly bool IsMainThread = true;
+
         public readonly static ManualResetEvent WorldGenBarrier = new ManualResetEvent(false);
+        public readonly static ManualResetEvent WorldMeshGenBarrier = new ManualResetEvent(false);
+
         public readonly static ConcurrentQueue<Vector3i> GridsToUpdate = new ConcurrentQueue<Vector3i>();
+        public readonly static ConcurrentQueue<Vector3i> GridMeshesToUpdate = new ConcurrentQueue<Vector3i>();
+
         public static Thread WorldGenThread;
+        public static Thread WorldMeshGenThread;
 
         public static GameWindow Window;
 
@@ -36,17 +43,25 @@ namespace Cubach.Client
         public static World World;
         public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
 
-        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
-        public readonly static Dictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new Dictionary<Vector3i, Mesh<VertexP3N3T2>>();
+        public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
+        public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
 
         public static ShaderProgram WorldShader;
         public static ShaderProgram LineShader;
-        public static int TextureHandle;
+        public static Texture2D Texture;
         public static Mesh<VertexP3C4> Lines;
 
         public static void Main(string[] args)
         {
-            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings() { Title = "Cubach", Size = new Vector2i(1600, 900) }))
+            using (Window = new GameWindow(new GameWindowSettings(), new NativeWindowSettings()
+            {
+                API = ContextAPI.OpenGL,
+                APIVersion = new Version(3, 3),
+                Profile = ContextProfile.Core,
+                Flags = ContextFlags.ForwardCompatible,
+                Title = "Cubach",
+                Size = new Vector2i(1600, 900)
+            }))
             {
                 Window.Load += Window_Load;
                 Window.Resize += Window_Resize;
@@ -59,6 +74,7 @@ namespace Cubach.Client
             Exiting = true;
 
             WorldGenBarrier.Set();
+            WorldMeshGenBarrier.Set();
         }
 
         private static void WorldGenCallback()
@@ -79,6 +95,30 @@ namespace Cubach.Client
                 }
 
                 WorldGenBarrier.Reset();
+            }
+        }
+
+        private static void WorldMeshGenCallback()
+        {
+            while (!Exiting)
+            {
+                WorldMeshGenBarrier.WaitOne();
+
+                if (GridsToUpdate.IsEmpty)
+                {
+                    WorldMeshGenBarrier.Reset();
+                    continue;
+                }
+
+                while (GridMeshesToUpdate.TryDequeue(out Vector3i gridPosition))
+                {
+                    if (World.Grids.TryGetValue(gridPosition, out Grid grid))
+                    {
+                        GenGridMesh(grid);
+                    }
+                }
+
+                WorldMeshGenBarrier.Reset();
             }
         }
 
@@ -106,82 +146,32 @@ namespace Cubach.Client
             WorldGenThread = new Thread(new ThreadStart(WorldGenCallback));
             WorldGenThread.Start();
 
+            WorldMeshGenThread = new Thread(new ThreadStart(WorldMeshGenCallback));
+            WorldMeshGenThread.Start();
+
             WorldGen = new WorldGen();
             World = new World(WorldGen);
 
-            GenNearGrids();
-            GenNearGridMeshes();
+            Texture = new Texture2D();
 
-            TextureHandle = GL.GenTexture();
-            GL.ActiveTexture(TextureUnit.Texture0);
-            GL.BindTexture(TextureTarget.Texture2D, TextureHandle);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.NearestMipmapLinear);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureBaseLevel, 0);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, 4);
-
-            using (var image = new Bitmap("./blocks.png"))
-            using (var copy = new Bitmap(image.Width, image.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            using (var image = new Bitmap("./Assets/blocks.png"))
+            using (var copy = new Bitmap(image.Width, image.Height, GDIPixelFormat.Format32bppArgb))
             using (var graphics = Graphics.FromImage(copy))
             {
                 graphics.Clear(Color.Transparent);
                 graphics.DrawImage(image, 0, 0, image.Width, image.Height);
 
-                BitmapData data = copy.LockBits(new Rectangle(0, 0, image.Width, image.Height), ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, image.Width, image.Height, 0, OpenTK.Graphics.OpenGL4.PixelFormat.Bgra, PixelType.UnsignedByte, data.Scan0);
-                copy.UnlockBits(data);
+                Texture.SetImage(copy);
             }
 
-            GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
-
-            string vertexShaderSource = @"#version 400
-#extension GL_ARB_explicit_uniform_location : enable
-
-layout (location = 0) uniform mat4 mvp;
-
-layout (location = 0) in vec3 in_position;
-layout (location = 1) in vec3 in_normal;
-layout (location = 2) in vec2 in_texCoord;
-
-out vec3 frag_position;
-out vec3 frag_normal;
-out vec2 frag_texCoord;
-
-void main(void) {
-  frag_position = in_position;
-  frag_normal = in_normal;
-  frag_texCoord = in_texCoord;
-  gl_Position = mvp * vec4(in_position, 1);
-}";
-
-            string fragmentShaderSource = @"#version 400
-#extension GL_ARB_explicit_uniform_location : enable
-
-layout (location = 1) uniform sampler2D colorTexture;
-layout (location = 2) uniform vec3 light;
-
-in vec3 frag_position;
-in vec3 frag_normal;
-in vec2 frag_texCoord;
-
-layout (location = 0) out vec4 out_color;
-
-void main(void) {
-  vec3 ambient = vec3(0.5);
-  vec3 diffuse = max(0, dot(light, frag_normal)) * vec3(0.5);
-  out_color = vec4(ambient + diffuse, 1) * texture(colorTexture, frag_texCoord);
-}";
-
             using var vertexShader = new Shader(ShaderType.VertexShader);
-            if (!vertexShader.Compile(vertexShaderSource))
+            if (!vertexShader.Compile(File.ReadAllText("./Assets/world.vert")))
             {
                 Console.WriteLine(vertexShader.GetError());
             }
 
             using var fragmentShader = new Shader(ShaderType.FragmentShader);
-            if (!fragmentShader.Compile(fragmentShaderSource))
+            if (!fragmentShader.Compile(File.ReadAllText("./Assets/world.frag")))
             {
                 Console.WriteLine(fragmentShader.GetError());
             }
@@ -194,40 +184,14 @@ void main(void) {
                 Console.WriteLine(WorldShader.GetError());
             }
 
-            string lineVertexShaderSource = @"#version 400
-#extension GL_ARB_explicit_uniform_location : enable
-
-layout (location = 0) uniform mat4 mvp;
-
-layout (location = 0) in vec3 in_position;
-layout (location = 1) in vec4 in_color;
-
-out vec4 frag_color;
-
-void main(void) {
-  frag_color = in_color;
-  gl_Position = mvp * vec4(in_position, 1);
-}";
-
-            string lineFragmentShaderSource = @"#version 400
-#extension GL_ARB_explicit_uniform_location : enable
-
-in vec4 frag_color;
-
-layout (location = 0) out vec4 out_color;
-
-void main(void) {
-  out_color = frag_color;
-}";
-
             using var lineVertexShader = new Shader(ShaderType.VertexShader);
-            if (!lineVertexShader.Compile(lineVertexShaderSource))
+            if (!lineVertexShader.Compile(File.ReadAllText("./Assets/line.vert")))
             {
                 Console.WriteLine(lineVertexShader.GetError());
             }
 
             using var lineFragmentShader = new Shader(ShaderType.FragmentShader);
-            if (!lineFragmentShader.Compile(lineFragmentShaderSource))
+            if (!lineFragmentShader.Compile(File.ReadAllText("./Assets/line.frag")))
             {
                 Console.WriteLine(lineFragmentShader.GetError());
             }
@@ -259,7 +223,7 @@ void main(void) {
 
             if (Window.KeyboardState.IsKeyDown(Keys.LeftShift))
             {
-                moveSpeed *= 2;
+                moveSpeed *= 5;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.A))
@@ -315,7 +279,7 @@ void main(void) {
                 PreviousFPS = fps;
             }
 
-            Window.Title = $"Cubach - {PreviousFPS.ToString("N2")} FPS";
+            Window.Title = $"Cubach - {PreviousFPS:N2} FPS";
         }
 
         private static Vector3 GetGridCenter(Vector3i gridPosition)
@@ -348,20 +312,82 @@ void main(void) {
             }
         }
 
+        private static readonly ConcurrentQueue<Action> DeferredActions = new ConcurrentQueue<Action>();
+
         private static void GenGridMesh(Grid grid)
         {
             if (!WorldOpaqueMeshes.ContainsKey(grid.Position))
             {
-                WorldOpaqueMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes());
-                WorldOpaqueMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                VertexP3N3T2[] vertexes = grid.GenVertexes();
+                if (IsMainThread)
+                {
+                    if (WorldOpaqueMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                    {
+                        existingMesh.Dispose();
+                    }
+
+                    var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                    mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                    if (!WorldOpaqueMeshes.TryAdd(grid.Position, mesh))
+                    {
+                        mesh.Dispose();
+                    }
+                }
+                else
+                {
+                    DeferredActions.Enqueue(() =>
+                    {
+                        if (WorldOpaqueMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                        {
+                            existingMesh.Dispose();
+                        }
+
+                        var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                        mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                        if (!WorldOpaqueMeshes.TryAdd(grid.Position, mesh))
+                        {
+                            mesh.Dispose();
+                        }
+                    });
+                }
 
                 Console.WriteLine($"Generated opaque grid mesh {grid.Position}");
             }
 
             if (!WorldTransparentMeshes.ContainsKey(grid.Position))
             {
-                WorldTransparentMeshes[grid.Position] = new Mesh<VertexP3N3T2>(grid.GenVertexes(opaque: false));
-                WorldTransparentMeshes[grid.Position].SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                VertexP3N3T2[] vertexes = grid.GenVertexes(opaque: false);
+                if (IsMainThread)
+                {
+                    if (WorldTransparentMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                    {
+                        existingMesh.Dispose();
+                    }
+
+                    var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                    mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                    if (!WorldTransparentMeshes.TryAdd(grid.Position, mesh))
+                    {
+                        mesh.Dispose();
+                    }
+                }
+                else
+                {
+                    DeferredActions.Enqueue(() =>
+                    {
+                        if (WorldTransparentMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                        {
+                            existingMesh.Dispose();
+                        }
+
+                        var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                        mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                        if (!WorldTransparentMeshes.TryAdd(grid.Position, mesh))
+                        {
+                            mesh.Dispose();
+                        }
+                    });
+                }
 
                 Console.WriteLine($"Generated transparent grid mesh {grid.Position}");
             }
@@ -369,19 +395,15 @@ void main(void) {
 
         private static void UnloadGridMesh(Vector3i gridPosition)
         {
-            if (WorldOpaqueMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> opaqueMesh))
+            if (WorldOpaqueMeshes.TryRemove(gridPosition, out Mesh<VertexP3N3T2> opaqueMesh))
             {
-                WorldOpaqueMeshes.Remove(gridPosition);
                 opaqueMesh.Dispose();
-
                 Console.WriteLine($"Unloaded opaque grid mesh {gridPosition}");
             }
 
-            if (WorldTransparentMeshes.TryGetValue(gridPosition, out Mesh<VertexP3N3T2> transparentMesh))
+            if (WorldTransparentMeshes.TryRemove(gridPosition, out Mesh<VertexP3N3T2> transparentMesh))
             {
-                WorldTransparentMeshes.Remove(gridPosition);
                 transparentMesh.Dispose();
-
                 Console.WriteLine($"Unloaded transparent grid mesh {gridPosition}");
             }
         }
@@ -391,8 +413,10 @@ void main(void) {
             const int minHeight = -1;
             const int maxHeight = 5;
 
+            bool added = false;
             Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GRID_SIZE);
             int genDistance = (int)MathF.Floor(GRID_GEN_DISTANCE / WorldGen.GRID_SIZE);
+            var gridsToUpdate = new List<Vector3i>();
 
             for (int i = cameraPosition.X - genDistance; i < cameraPosition.X + genDistance; ++i)
             {
@@ -413,13 +437,19 @@ void main(void) {
                             continue;
                         }
 
-                        GridsToUpdate.Enqueue(gridPosition);
+                        gridsToUpdate.Add(gridPosition);
+                        added = true;
                     }
                 }
             }
 
-            if (!GridsToUpdate.IsEmpty)
+            if (added)
             {
+                foreach (Vector3i gridPosition in gridsToUpdate)
+                {
+                    GridsToUpdate.Enqueue(gridPosition);
+                }
+
                 WorldGenBarrier.Set();
             }
         }
@@ -439,11 +469,11 @@ void main(void) {
 
         private static void GenNearGridMeshes()
         {
-            List<Vector3i> gridMeshesToUpdate = new List<Vector3i>();
-
+            bool found = false;
+            var gridMeshesToUpdate = new List<Vector3i>();
             foreach (Vector3i gridPosition in World.Grids.Keys)
             {
-                if (WorldOpaqueMeshes.ContainsKey(gridPosition))
+                if (WorldOpaqueMeshes.ContainsKey(gridPosition) || WorldTransparentMeshes.ContainsKey(gridPosition))
                 {
                     continue;
                 }
@@ -453,7 +483,13 @@ void main(void) {
                 if (distance < MESH_GEN_DISTANCE)
                 {
                     gridMeshesToUpdate.Add(gridPosition);
+                    found = true;
                 }
+            }
+
+            if (!found)
+            {
+                return;
             }
 
             gridMeshesToUpdate.Sort((Vector3i a, Vector3i b) =>
@@ -467,12 +503,17 @@ void main(void) {
                 return MathF.Sign(aDistance - bDistance);
             });
 
-            foreach (Vector3i gridPosition in gridMeshesToUpdate.Take(MAX_MESH_GEN_PER_FRAME).ToArray())
+            foreach (Vector3i gridPosition in gridMeshesToUpdate)
             {
-                if (World.Grids.TryGetValue(gridPosition, out Grid grid))
+                if (World.Grids.ContainsKey(gridPosition))
                 {
-                    GenGridMesh(grid);
+                    GridMeshesToUpdate.Enqueue(gridPosition);
                 }
+            }
+
+            if (!GridMeshesToUpdate.IsEmpty)
+            {
+                WorldMeshGenBarrier.Set();
             }
         }
 
@@ -519,6 +560,11 @@ void main(void) {
 
         private static void Window_RenderFrame(FrameEventArgs obj)
         {
+            while (DeferredActions.TryDequeue(out Action action))
+            {
+                action();
+            }
+
             GenNearGrids();
             UnloadFarGrids();
 
@@ -529,15 +575,18 @@ void main(void) {
 
             WorldShader.Use();
 
+            int worldColorTextureLocation = WorldShader.GetUniformLocation("colorTexture");
+            int worldLightLocation = WorldShader.GetUniformLocation("light");
+            int worldMvpLocation = WorldShader.GetUniformLocation("mvp");
+
             Matrix4 View = Camera.ViewMatrix;
             Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 512f);
             Matrix4 ViewProjection = View * Projection;
 
-            GL.Uniform1(1, 0);
-            GL.Uniform3(2, new Vector3(0.2f, 1, 0.1f).Normalized());
+            GL.Uniform1(worldColorTextureLocation, 0);
+            GL.Uniform3(worldLightLocation, new Vector3(0.2f, 1, 0.1f).Normalized());
 
-            GL.ActiveTexture(TextureUnit.Texture0);
-            GL.BindTexture(TextureTarget.Texture2D, TextureHandle);
+            Texture.Bind();
 
             foreach ((Vector3i gridPosition, var mesh) in WorldOpaqueMeshes)
             {
@@ -550,7 +599,7 @@ void main(void) {
 
                 Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
                 Matrix4 ModelViewProjection = Model * ViewProjection;
-                GL.UniformMatrix4(0, false, ref ModelViewProjection);
+                GL.UniformMatrix4(worldMvpLocation, false, ref ModelViewProjection);
                 mesh.Draw();
             }
 
@@ -586,14 +635,17 @@ void main(void) {
             {
                 Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
                 Matrix4 ModelViewProjection = Model * ViewProjection;
-                GL.UniformMatrix4(0, false, ref ModelViewProjection);
+                GL.UniformMatrix4(worldMvpLocation, false, ref ModelViewProjection);
                 mesh.Draw();
             }
 
+            GL.Disable(EnableCap.Blend);
             GL.Disable(EnableCap.CullFace);
 
             LineShader.Use();
-            GL.UniformMatrix4(0, false, ref ViewProjection);
+
+            int lineMvpLocation = LineShader.GetUniformLocation("mvp");
+            GL.UniformMatrix4(lineMvpLocation, false, ref ViewProjection);
 
             var lineVertexes = new List<VertexP3C4>();
             var ray = new Ray(Camera.Position, Camera.Front);
@@ -610,20 +662,23 @@ void main(void) {
                 Block? block = grid.RaycastBlock(ray, out Vector3 blockIntersection, out Vector3i blockPosition);
                 if (block.HasValue)
                 {
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 0), blockPosition + new Vector3(1, 0, 0), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 0), blockPosition + new Vector3(1, 1, 0), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 0), blockPosition + new Vector3(0, 1, 0), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 0), blockPosition + new Vector3(0, 0, 0), Color4.LightGray, 0.025f));
+                    const float selectionSize = 1.01f;
+                    const float lineWidth = 0.01f;
 
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 1), blockPosition + new Vector3(1, 0, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 1), blockPosition + new Vector3(1, 1, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 1), blockPosition + new Vector3(0, 1, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 1), blockPosition + new Vector3(0, 0, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 0), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 1, 0), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 0), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 0, 0), Color4.LightGray, lineWidth));
 
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 0, 0), blockPosition + new Vector3(0, 0, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 0, 0), blockPosition + new Vector3(1, 0, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(1, 1, 0), blockPosition + new Vector3(1, 1, 1), Color4.LightGray, 0.025f));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + new Vector3(0, 1, 0), blockPosition + new Vector3(0, 1, 1), Color4.LightGray, 0.025f));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 1), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 1), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 1), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 1), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
+
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
+                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
                     break;
                 }
 
@@ -636,6 +691,7 @@ void main(void) {
                 Lines.Draw();
             }
 
+            GL.Enable(EnableCap.Blend);
             GL.Enable(EnableCap.CullFace);
 
             Window.SwapBuffers();
@@ -653,11 +709,9 @@ void main(void) {
                 mesh.Dispose();
             }
 
-            GL.DeleteTexture(TextureHandle);
-
             WorldShader.Dispose();
             LineShader.Dispose();
-
+            Texture.Dispose();
             Lines.Dispose();
         }
     }

@@ -40,12 +40,10 @@ namespace Cubach.Client
             int gridZ = (int)MathF.Floor((float)position.Z / WorldGen.GRID_SIZE);
 
             var gridPosition = new Vector3i(gridX, gridY, gridZ);
-            if (!Grids.ContainsKey(gridPosition))
+            if (!Grids.TryGetValue(gridPosition, out Grid grid))
             {
                 return null;
             }
-
-            Grid grid = Grids[gridPosition];
 
             int blockX = position.X - gridX * WorldGen.GRID_SIZE;
             int blockY = position.Y - gridY * WorldGen.GRID_SIZE;
@@ -68,12 +66,10 @@ namespace Cubach.Client
             int gridZ = (int)MathF.Floor((float)position.Z / WorldGen.GRID_SIZE);
 
             var gridPosition = new Vector3i(gridX, gridY, gridZ);
-            if (!Grids.ContainsKey(gridPosition))
+            if (!Grids.TryGetValue(gridPosition, out Grid grid))
             {
-                GenGridAt(gridPosition);
+                grid = GenGridAt(gridPosition);
             }
-
-            Grid grid = Grids[gridPosition];
 
             int blockX = position.X - gridX * WorldGen.GRID_SIZE;
             int blockY = position.Y - gridY * WorldGen.GRID_SIZE;
