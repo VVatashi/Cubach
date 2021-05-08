@@ -715,16 +715,15 @@ namespace Cubach.Client
             GL.DepthMask(true);
         }
 
-        private static void DrawWorld(ref Matrix4 viewProjection)
+        private static void DrawWorld(ref Matrix4 view, ref Matrix4 projection)
         {
             WorldShader.Use();
 
-            int colorTextureLocation = WorldShader.GetUniformLocation("colorTexture");
-            int lightLocation = WorldShader.GetUniformLocation("light");
-            int mvpLocation = WorldShader.GetUniformLocation("mvp");
+            GL.UniformMatrix4(WorldShader.GetUniformLocation("viewMatrix"), false, ref view);
+            GL.UniformMatrix4(WorldShader.GetUniformLocation("projectionMatrix"), false, ref projection);
 
-            GL.Uniform1(colorTextureLocation, 0);
-            GL.Uniform3(lightLocation, new Vector3(0.2f, 1, 0.1f).Normalized());
+            GL.Uniform1(WorldShader.GetUniformLocation("colorTexture"), 0);
+            GL.Uniform3(WorldShader.GetUniformLocation("light"), new Vector3(0.2f, 1, 0.1f).Normalized());
 
             BlocksTexture.Bind();
 
@@ -738,8 +737,7 @@ namespace Cubach.Client
                 }
 
                 Matrix4 model = Matrix4.CreateTranslation(16 * gridPosition);
-                Matrix4 modelViewProjection = model * viewProjection;
-                GL.UniformMatrix4(mvpLocation, false, ref modelViewProjection);
+                GL.UniformMatrix4(WorldShader.GetUniformLocation("modelMatrix"), false, ref model);
                 mesh.Draw();
             }
 
@@ -774,8 +772,7 @@ namespace Cubach.Client
             foreach ((Vector3i gridPosition, var mesh) in transparentMeshes)
             {
                 Matrix4 model = Matrix4.CreateTranslation(16 * gridPosition);
-                Matrix4 modelViewProjection = model * viewProjection;
-                GL.UniformMatrix4(mvpLocation, false, ref modelViewProjection);
+                GL.UniformMatrix4(WorldShader.GetUniformLocation("modelMatrix"), false, ref model);
                 mesh.Draw();
             }
         }
@@ -817,7 +814,7 @@ namespace Cubach.Client
             Matrix4 viewProjection = view * projection;
 
             DrawSkybox(ref view, ref projection);
-            DrawWorld(ref viewProjection);
+            DrawWorld(ref view, ref projection);
 
             var lineVertexes = new List<VertexP3C4>();
             var ray = new Ray(Camera.Position, Camera.Front);
