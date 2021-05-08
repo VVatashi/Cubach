@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using GDIPixelFormat = System.Drawing.Imaging.PixelFormat;
 
@@ -41,15 +42,20 @@ namespace Cubach.Client
 
         public static WorldGen WorldGen;
         public static World World;
-        public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.FromAxisAngle(Vector3.UnitY, -3 * MathF.PI / 4));
+        public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.Identity);
 
         public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
         public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
 
+        public static ShaderProgram SkyboxShader;
         public static ShaderProgram WorldShader;
         public static ShaderProgram LineShader;
-        public static Texture2D Texture;
-        public static Mesh<VertexP3C4> Lines;
+
+        public static TextureCubemap SkyboxTexture;
+        public static Texture2D BlocksTexture;
+
+        public static Mesh<VertexP3> SkyboxMesh;
+        public static Mesh<VertexP3C4> LinesMesh;
 
         public static void Main(string[] args)
         {
@@ -89,7 +95,7 @@ namespace Cubach.Client
                     continue;
                 }
 
-                while (GridsToUpdate.TryDequeue(out Vector3i gridPosition))
+                while (!Exiting && GridsToUpdate.TryDequeue(out Vector3i gridPosition))
                 {
                     GenGrid(gridPosition);
                 }
@@ -110,7 +116,7 @@ namespace Cubach.Client
                     continue;
                 }
 
-                while (GridMeshesToUpdate.TryDequeue(out Vector3i gridPosition))
+                while (!Exiting && GridMeshesToUpdate.TryDequeue(out Vector3i gridPosition))
                 {
                     if (World.Grids.TryGetValue(gridPosition, out Grid grid))
                     {
@@ -120,6 +126,176 @@ namespace Cubach.Client
 
                 WorldMeshGenBarrier.Reset();
             }
+        }
+
+        private static void LoadSkyboxShader()
+        {
+            using var vertexShader = new Shader(ShaderType.VertexShader);
+            if (!vertexShader.Compile(File.ReadAllText("./Assets/skybox.vert")))
+            {
+                Console.WriteLine(vertexShader.GetError());
+            }
+
+            using var fragmentShader = new Shader(ShaderType.FragmentShader);
+            if (!fragmentShader.Compile(File.ReadAllText("./Assets/skybox.frag")))
+            {
+                Console.WriteLine(fragmentShader.GetError());
+            }
+
+            SkyboxShader = new ShaderProgram();
+            SkyboxShader.Attach(vertexShader);
+            SkyboxShader.Attach(fragmentShader);
+            if (!SkyboxShader.Link())
+            {
+                Console.WriteLine(SkyboxShader.GetError());
+            }
+        }
+
+        private static void LoadWorldShader()
+        {
+            using var vertexShader = new Shader(ShaderType.VertexShader);
+            if (!vertexShader.Compile(File.ReadAllText("./Assets/world.vert")))
+            {
+                Console.WriteLine(vertexShader.GetError());
+            }
+
+            using var fragmentShader = new Shader(ShaderType.FragmentShader);
+            if (!fragmentShader.Compile(File.ReadAllText("./Assets/world.frag")))
+            {
+                Console.WriteLine(fragmentShader.GetError());
+            }
+
+            WorldShader = new ShaderProgram();
+            WorldShader.Attach(vertexShader);
+            WorldShader.Attach(fragmentShader);
+            if (!WorldShader.Link())
+            {
+                Console.WriteLine(WorldShader.GetError());
+            }
+        }
+
+        private static void LoadLineShader()
+        {
+            using var vertexShader = new Shader(ShaderType.VertexShader);
+            if (!vertexShader.Compile(File.ReadAllText("./Assets/line.vert")))
+            {
+                Console.WriteLine(vertexShader.GetError());
+            }
+
+            using var fragmentShader = new Shader(ShaderType.FragmentShader);
+            if (!fragmentShader.Compile(File.ReadAllText("./Assets/line.frag")))
+            {
+                Console.WriteLine(fragmentShader.GetError());
+            }
+
+            LineShader = new ShaderProgram();
+            LineShader.Attach(vertexShader);
+            LineShader.Attach(fragmentShader);
+            if (!LineShader.Link())
+            {
+                Console.WriteLine(LineShader.GetError());
+            }
+        }
+
+        private static void LoadSkybox()
+        {
+            SkyboxTexture = new TextureCubemap();
+
+            string[] paths = new[] {
+                "./Assets/sky_right.png",
+                "./Assets/sky_left.png",
+                "./Assets/sky_top.png",
+                "./Assets/sky_bottom.png",
+                "./Assets/sky_front.png",
+                "./Assets/sky_back.png",
+            };
+
+            Bitmap[] images = paths.Select((string path) =>
+            {
+                using var image = new Bitmap(path);
+                var copy = new Bitmap(image.Width, image.Height, GDIPixelFormat.Format24bppRgb);
+
+                using var graphics = Graphics.FromImage(copy);
+                graphics.DrawImage(image, 0, 0, image.Width, image.Height);
+
+                return copy;
+            }).ToArray();
+
+            SkyboxTexture.SetImages(images);
+
+            foreach (Bitmap image in images)
+            {
+                image.Dispose();
+            }
+        }
+
+        private static void LoadBlocksTexture()
+        {
+            BlocksTexture = new Texture2D();
+
+            using (var image = new Bitmap("./Assets/blocks.png"))
+            using (var copy = new Bitmap(image.Width, image.Height, GDIPixelFormat.Format32bppArgb))
+            using (var graphics = Graphics.FromImage(copy))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.DrawImage(image, 0, 0, image.Width, image.Height);
+
+                BlocksTexture.SetImage(copy);
+            }
+        }
+
+        private static void CreateSkyboxMesh()
+        {
+            SkyboxMesh = new Mesh<VertexP3>(new VertexP3[] {
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3(-1, -1, -1)),
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3( 1,  1, -1)),
+
+                new VertexP3(new Vector3(-1, -1,  1)),
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3(-1, -1, -1)),
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3(-1, -1,  1)),
+                new VertexP3(new Vector3(-1,  1,  1)),
+
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3( 1, -1,  1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3( 1,  1, -1)),
+
+                new VertexP3(new Vector3(-1, -1,  1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3(-1,  1,  1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3(-1, -1,  1)),
+                new VertexP3(new Vector3( 1, -1,  1)),
+
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3( 1,  1, -1)),
+                new VertexP3(new Vector3( 1,  1,  1)),
+                new VertexP3(new Vector3(-1,  1, -1)),
+                new VertexP3(new Vector3(-1,  1,  1)),
+
+                new VertexP3(new Vector3(-1, -1, -1)),
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3(-1, -1,  1)),
+                new VertexP3(new Vector3( 1, -1, -1)),
+                new VertexP3(new Vector3( 1, -1,  1)),
+                new VertexP3(new Vector3(-1, -1,  1)),
+            });
+            SkyboxMesh.SetVertexAttribs(VertexP3.VertexAttribs);
+        }
+
+        private static void CreateLinesMesh()
+        {
+            LinesMesh = new Mesh<VertexP3C4>(new VertexP3C4[] { });
+            LinesMesh.SetVertexAttribs(VertexP3C4.VertexAttribs);
         }
 
         private static void Window_Load()
@@ -152,60 +328,15 @@ namespace Cubach.Client
             WorldGen = new WorldGen();
             World = new World(WorldGen);
 
-            Texture = new Texture2D();
+            LoadSkyboxShader();
+            LoadWorldShader();
+            LoadLineShader();
 
-            using (var image = new Bitmap("./Assets/blocks.png"))
-            using (var copy = new Bitmap(image.Width, image.Height, GDIPixelFormat.Format32bppArgb))
-            using (var graphics = Graphics.FromImage(copy))
-            {
-                graphics.Clear(Color.Transparent);
-                graphics.DrawImage(image, 0, 0, image.Width, image.Height);
+            LoadSkybox();
+            LoadBlocksTexture();
 
-                Texture.SetImage(copy);
-            }
-
-            using var vertexShader = new Shader(ShaderType.VertexShader);
-            if (!vertexShader.Compile(File.ReadAllText("./Assets/world.vert")))
-            {
-                Console.WriteLine(vertexShader.GetError());
-            }
-
-            using var fragmentShader = new Shader(ShaderType.FragmentShader);
-            if (!fragmentShader.Compile(File.ReadAllText("./Assets/world.frag")))
-            {
-                Console.WriteLine(fragmentShader.GetError());
-            }
-
-            WorldShader = new ShaderProgram();
-            WorldShader.Attach(vertexShader);
-            WorldShader.Attach(fragmentShader);
-            if (!WorldShader.Link())
-            {
-                Console.WriteLine(WorldShader.GetError());
-            }
-
-            using var lineVertexShader = new Shader(ShaderType.VertexShader);
-            if (!lineVertexShader.Compile(File.ReadAllText("./Assets/line.vert")))
-            {
-                Console.WriteLine(lineVertexShader.GetError());
-            }
-
-            using var lineFragmentShader = new Shader(ShaderType.FragmentShader);
-            if (!lineFragmentShader.Compile(File.ReadAllText("./Assets/line.frag")))
-            {
-                Console.WriteLine(lineFragmentShader.GetError());
-            }
-
-            LineShader = new ShaderProgram();
-            LineShader.Attach(lineVertexShader);
-            LineShader.Attach(lineFragmentShader);
-            if (!LineShader.Link())
-            {
-                Console.WriteLine(LineShader.GetError());
-            }
-
-            Lines = new Mesh<VertexP3C4>(new VertexP3C4[] { });
-            Lines.SetVertexAttribs(VertexP3C4.VertexAttribs);
+            CreateSkyboxMesh();
+            CreateLinesMesh();
 
             GL.Viewport(0, 0, Window.ClientSize.X, Window.ClientSize.Y);
         }
@@ -443,13 +574,18 @@ namespace Cubach.Client
                 }
             }
 
-            if (added)
+            if (!added)
             {
-                foreach (Vector3i gridPosition in gridsToUpdate)
-                {
-                    GridsToUpdate.Enqueue(gridPosition);
-                }
+                return;
+            }
 
+            foreach (Vector3i gridPosition in gridsToUpdate)
+            {
+                GridsToUpdate.Enqueue(gridPosition);
+            }
+
+            if (!GridsToUpdate.IsEmpty)
+            {
                 WorldGenBarrier.Set();
             }
         }
@@ -558,35 +694,39 @@ namespace Cubach.Client
             };
         }
 
-        private static void Window_RenderFrame(FrameEventArgs obj)
+        private static void DrawSkybox(ref Matrix4 view, ref Matrix4 projection)
         {
-            while (DeferredActions.TryDequeue(out Action action))
-            {
-                action();
-            }
+            GL.DepthMask(false);
 
-            GenNearGrids();
-            UnloadFarGrids();
+            SkyboxShader.Use();
 
-            GenNearGridMeshes();
-            UnloadFarGridMeshes();
+            int skyboxTextureLocation = SkyboxShader.GetUniformLocation("skyboxTexture");
+            int vpLocation = SkyboxShader.GetUniformLocation("vp");
 
-            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            GL.Uniform1(skyboxTextureLocation, 0);
 
+            Matrix3 v3 = new Matrix3(view);
+            Matrix4 v4 = new Matrix4(v3);
+            Matrix4 vp = v4 * projection;
+            GL.UniformMatrix4(vpLocation, false, ref vp);
+
+            SkyboxMesh.Draw();
+
+            GL.DepthMask(true);
+        }
+
+        private static void DrawWorld(ref Matrix4 viewProjection)
+        {
             WorldShader.Use();
 
-            int worldColorTextureLocation = WorldShader.GetUniformLocation("colorTexture");
-            int worldLightLocation = WorldShader.GetUniformLocation("light");
-            int worldMvpLocation = WorldShader.GetUniformLocation("mvp");
+            int colorTextureLocation = WorldShader.GetUniformLocation("colorTexture");
+            int lightLocation = WorldShader.GetUniformLocation("light");
+            int mvpLocation = WorldShader.GetUniformLocation("mvp");
 
-            Matrix4 View = Camera.ViewMatrix;
-            Matrix4 Projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 512f);
-            Matrix4 ViewProjection = View * Projection;
+            GL.Uniform1(colorTextureLocation, 0);
+            GL.Uniform3(lightLocation, new Vector3(0.2f, 1, 0.1f).Normalized());
 
-            GL.Uniform1(worldColorTextureLocation, 0);
-            GL.Uniform3(worldLightLocation, new Vector3(0.2f, 1, 0.1f).Normalized());
-
-            Texture.Bind();
+            BlocksTexture.Bind();
 
             foreach ((Vector3i gridPosition, var mesh) in WorldOpaqueMeshes)
             {
@@ -597,9 +737,9 @@ namespace Cubach.Client
                     continue;
                 }
 
-                Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
-                Matrix4 ModelViewProjection = Model * ViewProjection;
-                GL.UniformMatrix4(worldMvpLocation, false, ref ModelViewProjection);
+                Matrix4 model = Matrix4.CreateTranslation(16 * gridPosition);
+                Matrix4 modelViewProjection = model * viewProjection;
+                GL.UniformMatrix4(mvpLocation, false, ref modelViewProjection);
                 mesh.Draw();
             }
 
@@ -633,19 +773,51 @@ namespace Cubach.Client
 
             foreach ((Vector3i gridPosition, var mesh) in transparentMeshes)
             {
-                Matrix4 Model = Matrix4.CreateTranslation(16 * gridPosition);
-                Matrix4 ModelViewProjection = Model * ViewProjection;
-                GL.UniformMatrix4(worldMvpLocation, false, ref ModelViewProjection);
+                Matrix4 model = Matrix4.CreateTranslation(16 * gridPosition);
+                Matrix4 modelViewProjection = model * viewProjection;
+                GL.UniformMatrix4(mvpLocation, false, ref modelViewProjection);
                 mesh.Draw();
             }
+        }
 
+        private static void DrawLines(ref Matrix4 viewProjection, VertexP3C4[] vertexes)
+        {
             GL.Disable(EnableCap.Blend);
             GL.Disable(EnableCap.CullFace);
 
             LineShader.Use();
 
             int lineMvpLocation = LineShader.GetUniformLocation("mvp");
-            GL.UniformMatrix4(lineMvpLocation, false, ref ViewProjection);
+            GL.UniformMatrix4(lineMvpLocation, false, ref viewProjection);
+
+            LinesMesh.SetData(vertexes, BufferUsageHint.DynamicDraw);
+            LinesMesh.Draw();
+
+            GL.Enable(EnableCap.Blend);
+            GL.Enable(EnableCap.CullFace);
+        }
+
+        private static void Window_RenderFrame(FrameEventArgs obj)
+        {
+            while (DeferredActions.TryDequeue(out Action action))
+            {
+                action();
+            }
+
+            GenNearGrids();
+            UnloadFarGrids();
+
+            GenNearGridMeshes();
+            UnloadFarGridMeshes();
+
+            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+            Matrix4 view = Camera.ViewMatrix;
+            Matrix4 projection = Matrix4.CreatePerspectiveFieldOfView(MathF.PI / 4, (float)Window.ClientSize.X / Window.ClientSize.Y, 0.1f, 512f);
+            Matrix4 viewProjection = view * projection;
+
+            DrawSkybox(ref view, ref projection);
+            DrawWorld(ref viewProjection);
 
             var lineVertexes = new List<VertexP3C4>();
             var ray = new Ray(Camera.Position, Camera.Front);
@@ -687,18 +859,24 @@ namespace Cubach.Client
 
             if (lineVertexes.Count > 0)
             {
-                Lines.SetData(lineVertexes.ToArray(), BufferUsageHint.DynamicDraw);
-                Lines.Draw();
+                DrawLines(ref viewProjection, lineVertexes.ToArray());
             }
-
-            GL.Enable(EnableCap.Blend);
-            GL.Enable(EnableCap.CullFace);
 
             Window.SwapBuffers();
         }
 
         private static void Window_Closed()
         {
+            SkyboxShader.Dispose();
+            WorldShader.Dispose();
+            LineShader.Dispose();
+
+            SkyboxTexture.Dispose();
+            BlocksTexture.Dispose();
+
+            SkyboxMesh.Dispose();
+            LinesMesh.Dispose();
+
             foreach (var mesh in WorldOpaqueMeshes.Values)
             {
                 mesh.Dispose();
@@ -708,11 +886,6 @@ namespace Cubach.Client
             {
                 mesh.Dispose();
             }
-
-            WorldShader.Dispose();
-            LineShader.Dispose();
-            Texture.Dispose();
-            Lines.Dispose();
         }
     }
 }

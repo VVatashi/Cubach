@@ -136,12 +136,16 @@ namespace Cubach.Client
                             }
                         }
 
-                        for (int ii = -1; ii <= 1; ++ii)
+                        for (int ii = -2; ii <= 2; ++ii)
                         {
-                            for (int kk = -1; kk <= 1; ++kk)
+                            for (int kk = -2; kk <= 2; ++kk)
                             {
                                 int leavesMinHeight = ii == 0 && kk == 0 ? treeHeight : 3;
-                                int leavesMaxHeight = treeHeight + 2;
+                                int leavesMaxHeight = Math.Abs(ii) == 2 || Math.Abs(kk) == 2
+                                    ? treeHeight
+                                    : Math.Abs(ii) == 0 || Math.Abs(kk) == 0
+                                        ? treeHeight + 2
+                                        : treeHeight + 1;
 
                                 for (int j = leavesMinHeight; j < leavesMaxHeight; ++j)
                                 {

@@ -161,7 +161,13 @@ namespace Cubach.Client
                     return block;
                 }
 
-                distance = (farIntersection - ray.Origin).Length + 10e-3f;
+                float newDistance = (farIntersection - ray.Origin).Length + 10e-3f;
+                if (newDistance <= distance)
+                {
+                    break;
+                }
+
+                distance = newDistance;
             }
 
             intersection = Vector3.Zero;
