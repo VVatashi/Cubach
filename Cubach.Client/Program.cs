@@ -24,6 +24,10 @@ namespace Cubach.Client
 
         private const float MAX_RENDER_DISTANCE = 512f;
 
+        private static float PreviousFPS = 75;
+        private static float CurrentTime = 0;
+        private static float LastJumpTime = 0;
+
         public static bool Exiting = false;
 
         [ThreadStatic]
@@ -40,9 +44,10 @@ namespace Cubach.Client
 
         public static GameWindow Window;
 
-        public static WorldGen WorldGen;
-        public static World World;
-        public static Camera Camera = new Camera(new Vector3(0, 64, 0), Quaternion.Identity);
+        public static WorldGen WorldGen = new WorldGen();
+        public static World World = new World(WorldGen);
+        public static Player Player = new Player(new Vector3(0.1f, 64f, 0.1f));
+        public static Camera Camera = new Camera(Player.Position + 0.5f * Vector3.UnitY, Quaternion.Identity);
 
         public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldOpaqueMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
         public readonly static ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>> WorldTransparentMeshes = new ConcurrentDictionary<Vector3i, Mesh<VertexP3N3T2>>();
@@ -88,10 +93,10 @@ namespace Cubach.Client
             while (!Exiting)
             {
                 WorldGenBarrier.WaitOne();
+                WorldGenBarrier.Reset();
 
                 if (GridsToUpdate.IsEmpty)
                 {
-                    WorldGenBarrier.Reset();
                     continue;
                 }
 
@@ -99,8 +104,6 @@ namespace Cubach.Client
                 {
                     GenGrid(gridPosition);
                 }
-
-                WorldGenBarrier.Reset();
             }
         }
 
@@ -109,10 +112,10 @@ namespace Cubach.Client
             while (!Exiting)
             {
                 WorldMeshGenBarrier.WaitOne();
+                WorldMeshGenBarrier.Reset();
 
                 if (GridsToUpdate.IsEmpty)
                 {
-                    WorldMeshGenBarrier.Reset();
                     continue;
                 }
 
@@ -123,8 +126,6 @@ namespace Cubach.Client
                         GenGridMesh(grid);
                     }
                 }
-
-                WorldMeshGenBarrier.Reset();
             }
         }
 
@@ -325,9 +326,6 @@ namespace Cubach.Client
             WorldMeshGenThread = new Thread(new ThreadStart(WorldMeshGenCallback));
             WorldMeshGenThread.Start();
 
-            WorldGen = new WorldGen();
-            World = new World(WorldGen);
-
             LoadSkyboxShader();
             LoadWorldShader();
             LoadLineShader();
@@ -346,63 +344,234 @@ namespace Cubach.Client
             GL.Viewport(0, 0, Window.ClientSize.X, Window.ClientSize.Y);
         }
 
-        private static float PreviousFPS = 75;
-
-        private static void Window_UpdateFrame(FrameEventArgs obj)
+        private static void HandlePlayerInput(float deltaTime, bool isOnGround)
         {
-            float moveSpeed = 10f;
+            float moveAcceleration = isOnGround ? 25f : 2.5f;
 
-            if (Window.KeyboardState.IsKeyDown(Keys.LeftShift))
+            if (isOnGround && Window.KeyboardState.IsKeyDown(Keys.LeftShift))
             {
-                moveSpeed *= 5;
+                moveAcceleration *= 2;
             }
+
+            var playerMoveDirection = Vector3.Zero;
 
             if (Window.KeyboardState.IsKeyDown(Keys.A))
             {
-                Camera.Position -= Camera.Right * (float)obj.Time * moveSpeed;
+                playerMoveDirection -= new Vector3(Camera.Right.X, 0, Camera.Right.Z).Normalized();
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.D))
             {
-                Camera.Position += Camera.Right * (float)obj.Time * moveSpeed;
+                playerMoveDirection += new Vector3(Camera.Right.X, 0, Camera.Right.Z).Normalized();
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.W))
             {
-                Camera.Position += Camera.Front * (float)obj.Time * moveSpeed;
+                playerMoveDirection += new Vector3(Camera.Front.X, 0, Camera.Front.Z).Normalized();
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.S))
             {
-                Camera.Position -= Camera.Front * (float)obj.Time * moveSpeed;
+                playerMoveDirection -= new Vector3(Camera.Front.X, 0, Camera.Front.Z).Normalized();
             }
 
-            if (Window.KeyboardState.IsKeyDown(Keys.R))
+            if (playerMoveDirection.LengthSquared > 10e-3f)
             {
-                Camera.Position += Camera.Up * (float)obj.Time * moveSpeed;
+                Player.Velocity += playerMoveDirection.Normalized() * deltaTime * moveAcceleration;
             }
-            else if (Window.KeyboardState.IsKeyDown(Keys.F))
+
+            if (isOnGround && Window.KeyboardState.IsKeyDown(Keys.Space) && LastJumpTime < CurrentTime - 0.5f)
             {
-                Camera.Position -= Camera.Up * (float)obj.Time * moveSpeed;
+                const float jumpAcceleration = 380f;
+
+                Player.Velocity += Vector3.UnitY * deltaTime * jumpAcceleration;
+                LastJumpTime = CurrentTime;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.Left))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Vector3.UnitY, (float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Vector3.UnitY, deltaTime) * Camera.Rotation;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.Right))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Vector3.UnitY, -(float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Vector3.UnitY, -deltaTime) * Camera.Rotation;
             }
 
             if (Window.KeyboardState.IsKeyDown(Keys.Up))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, (float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, deltaTime) * Camera.Rotation;
             }
             else if (Window.KeyboardState.IsKeyDown(Keys.Down))
             {
-                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, -(float)obj.Time) * Camera.Rotation;
+                Camera.Rotation = Quaternion.FromAxisAngle(Camera.Right, -deltaTime) * Camera.Rotation;
             }
 
             Camera.Rotation.Normalize();
+        }
+
+        private static void Window_UpdateFrame(FrameEventArgs obj)
+        {
+            const float g = 9.81f;
+            const float frictionFactor = 0.9f;
+            const float airFrictionFactor = 0.99f;
+            const float maxPenetration = 0.25f;
+
+            var halfSize = 0.5f * Player.Size;
+            bool isOnGround = false;
+
+            var leftVertexes = new[] {
+                new Vector3(-halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3(-halfSize.X,           0, -halfSize.Z),
+                new Vector3(-halfSize.X,  halfSize.Y, -halfSize.Z),
+                new Vector3(-halfSize.X, -halfSize.Y,  halfSize.Z),
+                new Vector3(-halfSize.X,           0,  halfSize.Z),
+                new Vector3(-halfSize.X,  halfSize.Y,  halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in leftVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.X);
+                var ray = new Ray(Player.Position + vertexPosition, -Vector3.UnitX);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.X >= Player.Position.X - halfSize.X + (float)obj.Time * Player.Velocity.X
+                        && blockIntersection.X < Player.Position.X - halfSize.X + (float)obj.Time * Player.Velocity.X + maxPenetration)
+                    {
+                        Player.Position.X = blockIntersection.X + halfSize.X;
+                        Player.Velocity.X = 0;
+                        break;
+                    }
+                }
+            }
+
+            var rightVertexes = new[] {
+                new Vector3(halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3(halfSize.X,           0, -halfSize.Z),
+                new Vector3(halfSize.X,  halfSize.Y, -halfSize.Z),
+                new Vector3(halfSize.X, -halfSize.Y,  halfSize.Z),
+                new Vector3(halfSize.X,           0,  halfSize.Z),
+                new Vector3(halfSize.X,  halfSize.Y,  halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in rightVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.X);
+                var ray = new Ray(Player.Position + vertexPosition, Vector3.UnitX);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.X <= Player.Position.X + halfSize.X + (float)obj.Time * Player.Velocity.X
+                        && blockIntersection.X > Player.Position.X + halfSize.X + (float)obj.Time * Player.Velocity.X - maxPenetration)
+                    {
+                        Player.Position.X = blockIntersection.X - halfSize.X;
+                        Player.Velocity.X = 0;
+                        break;
+                    }
+                }
+            }
+
+            var frontVertexes = new[] {
+                new Vector3(-halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3(-halfSize.X,           0, -halfSize.Z),
+                new Vector3(-halfSize.X,  halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X,           0, -halfSize.Z),
+                new Vector3( halfSize.X,  halfSize.Y, -halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in frontVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.Z);
+                var ray = new Ray(Player.Position + vertexPosition, -Vector3.UnitZ);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.Z >= Player.Position.Z - halfSize.Z + (float)obj.Time * Player.Velocity.Z
+                        && blockIntersection.Z < Player.Position.Z - halfSize.Z + (float)obj.Time * Player.Velocity.Z + maxPenetration)
+                    {
+                        Player.Position.Z = blockIntersection.Z + halfSize.Z;
+                        Player.Velocity.Z = 0;
+                        break;
+                    }
+                }
+            }
+
+            var backVertexes = new[] {
+                new Vector3(-halfSize.X, -halfSize.Y, halfSize.Z),
+                new Vector3(-halfSize.X,           0, halfSize.Z),
+                new Vector3(-halfSize.X,  halfSize.Y, halfSize.Z),
+                new Vector3( halfSize.X, -halfSize.Y, halfSize.Z),
+                new Vector3( halfSize.X,           0, halfSize.Z),
+                new Vector3( halfSize.X,  halfSize.Y, halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in backVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.Z);
+                var ray = new Ray(Player.Position + vertexPosition, Vector3.UnitZ);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.Z <= Player.Position.Z + halfSize.Z + (float)obj.Time * Player.Velocity.Z
+                        && blockIntersection.Z > Player.Position.Z + halfSize.Z + (float)obj.Time * Player.Velocity.Z - maxPenetration)
+                    {
+                        Player.Position.Z = blockIntersection.Z - halfSize.Z;
+                        Player.Velocity.Z = 0;
+                        break;
+                    }
+                }
+            }
+
+            var bottomVertexes = new[] {
+                new Vector3(-halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X, -halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X, -halfSize.Y,  halfSize.Z),
+                new Vector3(-halfSize.X, -halfSize.Y,  halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in bottomVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.Y);
+                var ray = new Ray(Player.Position + vertexPosition, -Vector3.UnitY);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.Y >= Player.Position.Y - halfSize.Y + (float)obj.Time * Player.Velocity.Y
+                        && blockIntersection.Y < Player.Position.Y - halfSize.Y + (float)obj.Time * Player.Velocity.Y + maxPenetration)
+                    {
+                        Player.Position.Y = blockIntersection.Y + halfSize.Y;
+                        Player.Velocity.Y = 0;
+
+                        isOnGround = true;
+                        break;
+                    }
+                }
+            }
+
+            var topVertexes = new[] {
+                new Vector3(-halfSize.X, halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X, halfSize.Y, -halfSize.Z),
+                new Vector3( halfSize.X, halfSize.Y,  halfSize.Z),
+                new Vector3(-halfSize.X, halfSize.Y,  halfSize.Z),
+            };
+
+            foreach (Vector3 vertexPosition in topVertexes)
+            {
+                float maxDistance = (float)obj.Time * Math.Abs(Player.Velocity.Y);
+                var ray = new Ray(Player.Position + vertexPosition, Vector3.UnitY);
+                if (World.RaycastBlock(ray, 0f, Math.Max(WorldGen.GRID_SIZE, maxDistance), out Vector3 blockIntersection, out _).HasValue)
+                {
+                    if (blockIntersection.Y <= Player.Position.Y + halfSize.Y + (float)obj.Time * Player.Velocity.Y
+                        && blockIntersection.Y > Player.Position.Y + halfSize.Y + (float)obj.Time * Player.Velocity.Y - maxPenetration)
+                    {
+                        Player.Position.Y = blockIntersection.Y - halfSize.Y;
+                        Player.Velocity.Y = 0;
+                        break;
+                    }
+                }
+            }
+
+            Player.Position += (float)obj.Time * Player.Velocity;
+            Camera.Position = Player.Position + 0.5f * Vector3.UnitY;
+
+            HandlePlayerInput((float)obj.Time, isOnGround);
+
+            Player.Velocity -= g * (float)obj.Time * Vector3.UnitY;
+            Player.Velocity *= isOnGround ? frictionFactor : airFrictionFactor;
 
             if (Window.RenderTime > 0)
             {
@@ -411,6 +580,8 @@ namespace Cubach.Client
             }
 
             Window.Title = $"Cubach - {PreviousFPS:N2} FPS";
+
+            CurrentTime += (float)obj.Time;
         }
 
         private static Vector3 GetGridCenter(Vector3i gridPosition)
@@ -541,8 +712,8 @@ namespace Cubach.Client
 
         private static void GenNearGrids()
         {
-            const int minHeight = -1;
-            const int maxHeight = 5;
+            const int minHeight = -2;
+            const int maxHeight = 6;
 
             bool added = false;
             Vector3i cameraPosition = (Vector3i)(Camera.Position / WorldGen.GRID_SIZE);
@@ -818,40 +989,26 @@ namespace Cubach.Client
 
             var lineVertexes = new List<VertexP3C4>();
             var ray = new Ray(Camera.Position, Camera.Front);
-            float minDistance = 0f;
-            float maxDistance = 128f;
-            while (minDistance < maxDistance)
+            Block? block = World.RaycastBlock(ray, 0, 128, out _, out Vector3i blockPosition);
+            if (block.HasValue)
             {
-                Grid grid = World.RaycastGrid(ray, minDistance, maxDistance, out Vector3 gridIntersection);
-                if (grid == null)
-                {
-                    break;
-                }
+                const float selectionSize = 1.01f;
+                const float lineWidth = 0.01f;
 
-                Block? block = grid.RaycastBlock(ray, out Vector3 blockIntersection, out Vector3i blockPosition);
-                if (block.HasValue)
-                {
-                    const float selectionSize = 1.01f;
-                    const float lineWidth = 0.01f;
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 0), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 1, 0), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 0), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 0, 0), Color4.LightGray, lineWidth));
 
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 0), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 1, 0), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 0), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 0, 0), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 1), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 1), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 1), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 1), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
 
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 1), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 1), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 1), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 1), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
-
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
-                    lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
-                    break;
-                }
-
-                minDistance = (gridIntersection - ray.Origin).Length + 0.1f;
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 0, 0), blockPosition + selectionSize * new Vector3(0, 0, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 0, 0), blockPosition + selectionSize * new Vector3(1, 0, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(1, 1, 0), blockPosition + selectionSize * new Vector3(1, 1, 1), Color4.LightGray, lineWidth));
+                lineVertexes.AddRange(GenLineVertexes(blockPosition + selectionSize * new Vector3(0, 1, 0), blockPosition + selectionSize * new Vector3(0, 1, 1), Color4.LightGray, lineWidth));
             }
 
             if (lineVertexes.Count > 0)
