@@ -149,7 +149,7 @@ namespace Cubach.Client
                 Vector3 position = ray.Origin + ray.Direction * distance;
                 blockPosition = new Vector3i((int)Math.Floor(position.X), (int)Math.Floor(position.Y), (int)Math.Floor(position.Z));
                 AABB blockAABB = new AABB(blockPosition, blockPosition + new Vector3i(1, 1, 1));
-                if (!CollisionDetection.RayAABBIntersection3(blockAABB, ray, out Vector3 nearIntersection, out Vector3 farIntersection))
+                if (!CollisionDetection.RayAABBIntersection(blockAABB, ray, out Vector3 nearIntersection, out Vector3 farIntersection))
                 {
                     break;
                 }

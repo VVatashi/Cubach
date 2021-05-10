@@ -96,7 +96,7 @@ namespace Cubach.Client
                 }
 
                 AABB gridAABB = new AABB(16 * grid.Position, 16 * grid.Position + grid.Size);
-                if (!CollisionDetection.RayAABBIntersection3(gridAABB, ray, out _, out Vector3 farIntersection))
+                if (!CollisionDetection.RayAABBIntersection(gridAABB, ray, out _, out Vector3 farIntersection))
                 {
                     break;
                 }

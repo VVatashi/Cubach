@@ -16,11 +16,11 @@ namespace Cubach.Client
 {
     public static class Program
     {
-        private const float GRID_GEN_DISTANCE = 200;
-        private const float GRID_UNLOAD_DISTANCE = 300;
+        private const float GRID_GEN_DISTANCE = 300;
+        private const float GRID_UNLOAD_DISTANCE = 500;
 
-        private const float MESH_GEN_DISTANCE = 200;
-        private const float MESH_UNLOAD_DISTANCE = 300;
+        private const float MESH_GEN_DISTANCE = 300;
+        private const float MESH_UNLOAD_DISTANCE = 500;
 
         private const float MAX_RENDER_DISTANCE = 500;
 
@@ -119,7 +119,7 @@ namespace Cubach.Client
                 WorldMeshGenBarrier.WaitOne();
                 WorldMeshGenBarrier.Reset();
 
-                if (GridsToUpdate.IsEmpty)
+                if (GridMeshesToUpdate.IsEmpty)
                 {
                     continue;
                 }
@@ -374,6 +374,9 @@ namespace Cubach.Client
             }
         }
 
+        private static float LastBlockDeleteTime = 0;
+        private static float LastBlockPlaceTime = 0;
+
         private static Vector3 HandlePlayerInput(bool isOnGround)
         {
             Vector3 acceleration = Vector3.Zero;
@@ -454,6 +457,109 @@ namespace Cubach.Client
                 }
 
                 Camera.Rotation.Normalize();
+
+                if (Window.MouseState.IsButtonDown(MouseButton.Left) && LastBlockDeleteTime < CurrentTime - 0.25f)
+                {
+                    var ray = new Ray(Camera.Position, Camera.Front);
+                    if (World.RaycastBlock(ray, 0, 128f, out _, out Vector3i blockPosition).HasValue)
+                    {
+                        World.SetBlockAt(blockPosition, new Block((byte)BlockType.GetIdByName("air")));
+
+                        var gridPosition = new Vector3i((int)MathF.Floor(blockPosition.X / 16f), (int)MathF.Floor(blockPosition.Y / 16f), (int)MathF.Floor(blockPosition.Z / 16f));
+                        GridMeshesToUpdate.Enqueue(gridPosition);
+
+                        var blockLocalPosition = blockPosition - WorldGen.GRID_SIZE * gridPosition;
+
+                        if (blockLocalPosition.X == 0)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(-1, 0, 0));
+                        }
+
+                        if (blockLocalPosition.Y == 0)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, -1, 0));
+                        }
+
+                        if (blockLocalPosition.Z == 0)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 0, -1));
+                        }
+
+                        if (blockLocalPosition.X == WorldGen.GRID_SIZE - 1)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(1, 0, 0));
+                        }
+
+                        if (blockLocalPosition.Y == WorldGen.GRID_SIZE - 1)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 1, 0));
+                        }
+
+                        if (blockLocalPosition.Z == WorldGen.GRID_SIZE - 1)
+                        {
+                            GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 0, 1));
+                        }
+
+                        WorldMeshGenBarrier.Set();
+
+                        LastBlockDeleteTime = CurrentTime;
+                    }
+                }
+
+                if (Window.MouseState.IsButtonDown(MouseButton.Right) && LastBlockPlaceTime < CurrentTime - 0.25f)
+                {
+                    var ray = new Ray(Camera.Position, Camera.Front);
+                    if (World.RaycastBlock(ray, 0, 128f, out Vector3 intersection, out _).HasValue)
+                    {
+                        intersection -= ray.Direction * 10e-3f;
+
+                        var blockPosition = new Vector3i((int)MathF.Floor(intersection.X), (int)MathF.Floor(intersection.Y), (int)MathF.Floor(intersection.Z));
+                        var blockAABB = new AABB(blockPosition, blockPosition + new Vector3i(1, 1, 1));
+                        if (!CollisionDetection.AABBIntersection(blockAABB, Player.AABB))
+                        {
+                            World.SetBlockAt(blockPosition, new Block((byte)BlockType.GetIdByName("glass")));
+
+                            var gridPosition = new Vector3i((int)MathF.Floor(blockPosition.X / 16f), (int)MathF.Floor(blockPosition.Y / 16f), (int)MathF.Floor(blockPosition.Z / 16f));
+                            GridMeshesToUpdate.Enqueue(gridPosition);
+
+                            var blockLocalPosition = blockPosition - WorldGen.GRID_SIZE * gridPosition;
+
+                            if (blockLocalPosition.X == 0)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(-1, 0, 0));
+                            }
+
+                            if (blockLocalPosition.Y == 0)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, -1, 0));
+                            }
+
+                            if (blockLocalPosition.Z == 0)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 0, -1));
+                            }
+
+                            if (blockLocalPosition.X == WorldGen.GRID_SIZE - 1)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(1, 0, 0));
+                            }
+
+                            if (blockLocalPosition.Y == WorldGen.GRID_SIZE - 1)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 1, 0));
+                            }
+
+                            if (blockLocalPosition.Z == WorldGen.GRID_SIZE - 1)
+                            {
+                                GridMeshesToUpdate.Enqueue(gridPosition + new Vector3i(0, 0, 1));
+                            }
+
+                            WorldMeshGenBarrier.Set();
+
+                            LastBlockPlaceTime = CurrentTime;
+                        }
+                    }
+                }
 
                 Window.MousePosition = new Vector2(Window.ClientSize.X / 2, Window.ClientSize.Y / 2);
             }
@@ -675,80 +781,78 @@ namespace Cubach.Client
 
         private static void GenGridMesh(Grid grid)
         {
-            if (!WorldOpaqueMeshes.ContainsKey(grid.Position))
+            VertexP3N3T2[] opaqueVertexes = grid.GenVertexes();
+            if (IsMainThread)
             {
-                VertexP3N3T2[] vertexes = grid.GenVertexes();
-                if (IsMainThread)
+                if (WorldOpaqueMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                {
+                    existingMesh.Dispose();
+                }
+
+                var mesh = new Mesh<VertexP3N3T2>(opaqueVertexes);
+                mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                if (!WorldOpaqueMeshes.TryAdd(grid.Position, mesh))
+                {
+                    mesh.Dispose();
+                }
+
+                Console.WriteLine($"Generated opaque grid mesh {grid.Position}");
+            }
+            else
+            {
+                DeferredActions.Enqueue(() =>
                 {
                     if (WorldOpaqueMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
                     {
                         existingMesh.Dispose();
                     }
 
-                    var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                    var mesh = new Mesh<VertexP3N3T2>(opaqueVertexes);
                     mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
                     if (!WorldOpaqueMeshes.TryAdd(grid.Position, mesh))
                     {
                         mesh.Dispose();
                     }
-                }
-                else
-                {
-                    DeferredActions.Enqueue(() =>
-                    {
-                        if (WorldOpaqueMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
-                        {
-                            existingMesh.Dispose();
-                        }
 
-                        var mesh = new Mesh<VertexP3N3T2>(vertexes);
-                        mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
-                        if (!WorldOpaqueMeshes.TryAdd(grid.Position, mesh))
-                        {
-                            mesh.Dispose();
-                        }
-                    });
-                }
-
-                Console.WriteLine($"Generated opaque grid mesh {grid.Position}");
+                    Console.WriteLine($"Generated opaque grid mesh {grid.Position}");
+                });
             }
 
-            if (!WorldTransparentMeshes.ContainsKey(grid.Position))
+            VertexP3N3T2[] transparentVertexes = grid.GenVertexes(opaque: false);
+            if (IsMainThread)
             {
-                VertexP3N3T2[] vertexes = grid.GenVertexes(opaque: false);
-                if (IsMainThread)
+                if (WorldTransparentMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
+                {
+                    existingMesh.Dispose();
+                }
+
+                var mesh = new Mesh<VertexP3N3T2>(transparentVertexes);
+                mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
+                if (!WorldTransparentMeshes.TryAdd(grid.Position, mesh))
+                {
+                    mesh.Dispose();
+                }
+
+                Console.WriteLine($"Generated transparent grid mesh {grid.Position}");
+            }
+            else
+            {
+                DeferredActions.Enqueue(() =>
                 {
                     if (WorldTransparentMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
                     {
                         existingMesh.Dispose();
                     }
 
-                    var mesh = new Mesh<VertexP3N3T2>(vertexes);
+                    var mesh = new Mesh<VertexP3N3T2>(transparentVertexes);
                     mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
                     if (!WorldTransparentMeshes.TryAdd(grid.Position, mesh))
                     {
                         mesh.Dispose();
                     }
-                }
-                else
-                {
-                    DeferredActions.Enqueue(() =>
-                    {
-                        if (WorldTransparentMeshes.TryRemove(grid.Position, out Mesh<VertexP3N3T2> existingMesh))
-                        {
-                            existingMesh.Dispose();
-                        }
 
-                        var mesh = new Mesh<VertexP3N3T2>(vertexes);
-                        mesh.SetVertexAttribs(VertexP3N3T2.VertexAttribs);
-                        if (!WorldTransparentMeshes.TryAdd(grid.Position, mesh))
-                        {
-                            mesh.Dispose();
-                        }
-                    });
-                }
-
-                Console.WriteLine($"Generated transparent grid mesh {grid.Position}");
+                    Console.WriteLine($"Generated transparent grid mesh {grid.Position}");
+                });
             }
         }
 
@@ -837,7 +941,8 @@ namespace Cubach.Client
             var gridMeshesToUpdate = new List<Vector3i>();
             foreach (Vector3i gridPosition in World.Grids.Keys)
             {
-                if (WorldOpaqueMeshes.ContainsKey(gridPosition) || WorldTransparentMeshes.ContainsKey(gridPosition))
+                if (GridMeshesToUpdate.Contains(gridPosition)
+                    || WorldOpaqueMeshes.ContainsKey(gridPosition) || WorldTransparentMeshes.ContainsKey(gridPosition))
                 {
                     continue;
                 }

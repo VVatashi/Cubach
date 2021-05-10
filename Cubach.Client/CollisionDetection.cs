@@ -5,7 +5,22 @@ namespace Cubach.Client
 {
     public static class CollisionDetection
     {
-        public static bool RayAABBIntersection3(AABB aabb, Ray ray, out Vector3 nearIntersection, out Vector3 farIntersection)
+        public static bool AABBIntersection(AABB a, AABB b)
+        {
+            if (a.Min.X > b.Max.X || a.Min.Y > b.Max.Y || a.Min.Z > b.Max.Z)
+            {
+                return false;
+            }
+
+            if (b.Min.X > a.Max.X || b.Min.Y > a.Max.Y || b.Min.Z > a.Max.Z)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool RayAABBIntersection(AABB aabb, Ray ray, out Vector3 nearIntersection, out Vector3 farIntersection)
         {
             float tx1 = (aabb.Min.X - ray.Origin.X) / ray.Direction.X;
             float tx2 = (aabb.Max.X - ray.Origin.X) / ray.Direction.X;
