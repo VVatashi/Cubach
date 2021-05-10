@@ -4,7 +4,7 @@ namespace Cubach.Client
 {
     public class Player
     {
-        public static Vector3 Size = new Vector3(0.75f, 1.75f, 0.75f);
+        public static Vector3 Size = new Vector3(0.8f, 1.8f, 0.8f);
 
         public Vector3 Position;
         public Vector3 Velocity;
